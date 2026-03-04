@@ -7,7 +7,8 @@ import {
   Edit2, ChevronDown, Calendar, ShieldCheck, RefreshCw, ArrowRight, Settings,
   CheckCircle, AlertTriangle, Info, Eye, EyeOff, Copy, FolderOpen, Folder,
   History, Image as ImageIcon, Maximize2, Key, FlaskConical,
-  Shuffle, BookOpen, ClipboardPaste, UserX
+  Shuffle, BookOpen, ClipboardPaste, UserX, BookOpenCheck, GraduationCap,
+  Archive, Bell, BellOff, Shield
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SCHOOL_LAT, SCHOOL_LON, MAX_DISTANCE_METERS, getDistance, getCurrentWIBTime, getStatus } from './constants';
@@ -72,7 +73,8 @@ const ToastContainer = () => {
 // --- CONSTANTS ---
 const MEMBER_STATUSES = {
   HADIR: 'Hadir', IZIN: 'Izin', SAKIT: 'Sakit',
-  TIDAK_MASUK: 'Tidak Masuk', IZIN_TELAT: 'Izin Telat', TIDAK_: 'Tidak '
+  TIDAK_MASUK: 'Tidak Masuk', IZIN_TELAT: 'Izin Telat', TIDAK_: 'Tidak ',
+  DISPEN: 'Dispen', ALFA: 'Alfa'
 } as const;
 type MemberStatus = typeof MEMBER_STATUSES[keyof typeof MEMBER_STATUSES];
 const DAYS_ORDER = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
@@ -93,7 +95,17 @@ const safeFetch = async (url: string, options?: RequestInit) => {
   return res.json();
 };
 
-const getTodayStr = () => new Date().toISOString().split('T')[0];
+// Server-side date fetch (anti-fraud)
+let _serverDateCache: { date: string; ts: number } | null = null;
+const getServerDate = async (): Promise<string> => {
+  if (_serverDateCache && Date.now() - _serverDateCache.ts < 60000) return _serverDateCache.date;
+  try {
+    const r = await safeFetch('/api/server-time');
+    _serverDateCache = { date: r.date, ts: Date.now() };
+    return r.date;
+  } catch { return new Date().toISOString().split('T')[0]; }
+};
+const getTodayStr = () => new Date().toISOString().split('T')[0]; // fallback only
 
 // --- IMAGE PREVIEW MODAL ---
 const ImagePreviewModal = ({ src, onClose }: { src: string; onClose: () => void }) => (
@@ -893,7 +905,7 @@ const SetupPage = ({ onSetup }: { onSetup: (code: string) => void }) => {
 };
 
 // --- LOGIN PAGE ---
-const LoginPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
+const LoginPage = ({ onLogin, onGuest }: { onLogin: (user: User) => void; onGuest: () => void }) => {
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -960,9 +972,159 @@ const LoginPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
               {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <>Masuk Sekarang<ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" /></>}
             </button>
           </form>
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <button onClick={onGuest}
+              className="w-full py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-2xl transition-all flex items-center justify-center gap-2 text-sm">
+              <Eye size={16} />Masuk sebagai Guest
+            </button>
+          </div>
         </div>
         <p className="text-center mt-8 text-slate-400 text-sm font-medium">@mynamethiris</p>
       </motion.div>
+    </div>
+  );
+};
+
+// --- GUEST PANEL ---
+const GuestPanel = ({ onBack }: { onBack: () => void }) => {
+  const [activeTab, setActiveTab] = useState<'jadwal_pelajaran' | 'jadwal_piket'>('jadwal_pelajaran');
+  const [jadwalPelajaran, setJadwalPelajaran] = useState<any[]>([]);
+  const [jadwalPiket, setJadwalPiket] = useState<any[]>([]);
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [members, setMembers] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [jp, s, m, u] = await Promise.all([
+          safeFetch('/api/jadwal-pelajaran'),
+          safeFetch('/api/schedules'),
+          safeFetch('/api/members'),
+          safeFetch('/api/users'),
+        ]);
+        setJadwalPelajaran(jp);
+        setSchedules(s);
+        setMembers(m);
+        setUsers(u);
+      } catch { }
+      setLoading(false);
+    };
+    load();
+  }, []);
+
+  const byDay = DAYS_ORDER.reduce((acc: any, d) => {
+    acc[d] = jadwalPelajaran.filter((j: any) => j.hari === d).sort((a: any, b: any) => a.jam_ke - b.jam_ke);
+    return acc;
+  }, {});
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <nav className="bg-white/80 backdrop-blur-md border-b border-slate-100 px-4 sm:px-6 py-4 sticky top-0 z-50">
+        <div className="max-w-5xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-slate-700 text-white rounded-xl flex items-center justify-center shadow-lg">
+              <Eye size={18} />
+            </div>
+            <div>
+              <h1 className="font-bold text-slate-900 text-base">Mode Guest</h1>
+              <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Akses Terbatas</p>
+            </div>
+          </div>
+          <button onClick={onBack} className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-sm transition-all">
+            <LogOut size={15} />Keluar
+          </button>
+        </div>
+      </nav>
+
+      <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+        {/* Tab */}
+        <div className="flex bg-white p-1.5 rounded-2xl border border-slate-100 gap-1 shadow-sm">
+          {[
+            { id: 'jadwal_pelajaran', label: 'Jadwal Pelajaran', icon: BookOpenCheck },
+            { id: 'jadwal_piket', label: 'Jadwal Piket', icon: Users },
+          ].map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id as any)}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === tab.id ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              <tab.icon size={16} />{tab.label}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-20"><div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" /></div>
+        ) : activeTab === 'jadwal_pelajaran' ? (
+          <div className="space-y-4">
+            {jadwalPelajaran.length === 0 ? (
+              <div className="py-20 text-center bg-white rounded-3xl border border-slate-100">
+                <BookOpenCheck size={40} className="text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-400 font-medium">Jadwal pelajaran belum tersedia.</p>
+              </div>
+            ) : DAYS_ORDER.filter(d => byDay[d].length > 0).map(day => (
+              <div key={day} className="bg-white rounded-3xl border border-slate-100 overflow-hidden shadow-sm">
+                <div className="px-6 py-4 bg-emerald-50 border-b border-emerald-100">
+                  <h3 className="font-bold text-emerald-800 text-sm uppercase tracking-widest">{day}</h3>
+                </div>
+                <div className="divide-y divide-slate-50">
+                  {byDay[day].map((jp: any) => (
+                    <div key={jp.id} className="px-6 py-3 flex items-center gap-4">
+                      <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center font-black text-sm shrink-0">{jp.jam_ke}</div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-slate-900 text-sm">{jp.mata_pelajaran}</p>
+                        {jp.guru && <p className="text-xs text-slate-400 font-medium">{jp.guru}</p>}
+                      </div>
+                      {(jp.jam_mulai || jp.jam_selesai) && (
+                        <span className="text-xs font-bold text-slate-400 shrink-0">{jp.jam_mulai}{jp.jam_selesai ? ` – ${jp.jam_selesai}` : ''}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {schedules.length === 0 ? (
+              <div className="py-20 text-center bg-white rounded-3xl border border-slate-100">
+                <Users size={40} className="text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-400 font-medium">Jadwal piket belum tersedia.</p>
+              </div>
+            ) : schedules.map((sched: any) => {
+              const pjUser = users.find((u: any) => u.role === 'pj' && u.group_name === sched.group_name);
+              const groupMembers = members.filter((m: any) => pjUser && m.pj_id === pjUser.id);
+              return (
+                <div key={sched.id} className="bg-white rounded-3xl border border-slate-100 overflow-hidden shadow-sm">
+                  <div className="px-6 py-4 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
+                    <h3 className="font-bold text-blue-800 text-sm uppercase tracking-widest">{sched.day}</h3>
+                    <span className="text-xs font-bold text-blue-600 bg-blue-100 px-3 py-1 rounded-full">{sched.group_name}</span>
+                  </div>
+                  <div className="px-6 py-4 space-y-2">
+                    {pjUser && (
+                      <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-2xl border border-blue-100">
+                        <div className="w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center font-bold text-sm shrink-0">{pjUser.name.charAt(0)}</div>
+                        <div>
+                          <p className="font-bold text-blue-900 text-sm">{pjUser.name}</p>
+                          <p className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">PJ</p>
+                        </div>
+                      </div>
+                    )}
+                    {groupMembers.filter((m: any) => m.name !== pjUser?.name).map((m: any) => (
+                      <div key={m.id} className="flex items-center gap-3 p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                        <div className="w-7 h-7 bg-slate-200 text-slate-600 rounded-lg flex items-center justify-center font-bold text-xs shrink-0">{m.name.charAt(0)}</div>
+                        <p className="font-medium text-slate-800 text-sm">{m.name}</p>
+                      </div>
+                    ))}
+                    {groupMembers.length === 0 && !pjUser && (
+                      <p className="text-xs text-slate-400 italic text-center py-2">Belum ada anggota</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
     </div>
   );
 };
@@ -1071,7 +1233,16 @@ const TestingPage = () => {
         <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center"><FlaskConical size={24} /></div>
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Halaman Simulasi Testing</h2>
-          <p className="text-sm text-blue-600 font-bold">Mode testing aktif - Lokasi, Timestamp &amp; Jadwal diabaikan</p>
+          <p className="text-sm text-blue-600 font-bold">Mode testing aktif — Lokasi, Timestamp & Jadwal diabaikan</p>
+        </div>
+      </div>
+      <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-2xl">
+        <div className="flex items-start gap-3">
+          <Info size={16} className="text-blue-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-xs font-black text-blue-800 uppercase tracking-widest mb-1">⚠ Zona Testing Terisolasi</p>
+            <p className="text-xs text-blue-700 font-medium leading-relaxed">Data yang dikirim melalui halaman ini <strong>tetap masuk ke database</strong> (dengan flag testing). Akun PJ asli tidak dapat melihat atau mengakses laporan testing ini. Hapus data testing setelah selesai via tab Laporan.</p>
+          </div>
         </div>
       </div>
 
@@ -1207,11 +1378,48 @@ const TestingPage = () => {
   );
 };
 
+// --- PJ JADWAL PELAJARAN (Read Only) ---
+const PJJadwalPelajaranView = () => {
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { safeFetch('/api/jadwal-pelajaran').then(setRows).catch(() => {}).finally(() => setLoading(false)); }, []);
+  const byDay = DAYS_ORDER.reduce((acc: any, d) => { acc[d] = rows.filter(r => r.hari === d).sort((a: any, b: any) => a.jam_ke - b.jam_ke); return acc; }, {});
+  if (loading) return <div className="flex items-center justify-center py-20"><div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" /></div>;
+  if (rows.length === 0) return (
+    <div className="py-20 text-center bg-white rounded-3xl border border-slate-100">
+      <BookOpenCheck size={40} className="text-slate-300 mx-auto mb-3" />
+      <p className="text-slate-400 font-medium">Jadwal pelajaran belum diisi oleh admin.</p>
+    </div>
+  );
+  return (
+    <div className="space-y-4">
+      {DAYS_ORDER.filter(d => byDay[d].length > 0).map(day => (
+        <div key={day} className="bg-white rounded-3xl border border-slate-100 overflow-hidden shadow-sm">
+          <div className="px-6 py-3 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between">
+            <h4 className="font-bold text-emerald-800 text-sm uppercase tracking-widest">{day}</h4>
+            <span className="text-[10px] font-bold text-emerald-500">{byDay[day].length} jam</span>
+          </div>
+          {byDay[day].map((r: any) => (
+            <div key={r.id} className="px-6 py-3 flex items-center gap-4 border-b border-slate-50 last:border-0">
+              <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center font-black text-sm shrink-0">{r.jam_ke}</div>
+              <div className="flex-1">
+                <p className="font-bold text-slate-900 text-sm">{r.mata_pelajaran}</p>
+                {r.guru && <p className="text-xs text-slate-400">{r.guru}</p>}
+              </div>
+              {(r.jam_mulai || r.jam_selesai) && <span className="text-xs font-bold text-slate-400 shrink-0">{r.jam_mulai}{r.jam_selesai ? `–${r.jam_selesai}` : ''}</span>}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+};
+
 // --- PJ DASHBOARD ---
 const PJDashboard = ({ user }: { user: User }) => {
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [location, setLocation] = useState<{ lat: number; lon: number } | null>(null);
+  const [location, setLocation] = useState<{ lat: number; lon: number; accuracy?: number; provider?: string } | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
   const [photo, setPhoto] = useState<File | null>(null);
   const [cleaningPhoto, setCleaningPhoto] = useState<File | null>(null);
@@ -1225,7 +1433,7 @@ const PJDashboard = ({ user }: { user: User }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedAbsentSchool, setSelectedAbsentSchool] = useState<ClassMember[]>([]);
-  const [activeView, setActiveView] = useState<'dashboard' | 'history' | 'schedule'>('dashboard');
+  const [activeView, setActiveView] = useState<'dashboard' | 'history' | 'schedule' | 'jadwal_pelajaran'>('dashboard');
   const [history, setHistory] = useState<Report[]>([]);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [editingReport, setEditingReport] = useState<Report | null>(null);
@@ -1233,14 +1441,32 @@ const PJDashboard = ({ user }: { user: User }) => {
   const [editPhotoType, setEditPhotoType] = useState<'cleaning' | 'checkin'>('cleaning');
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [showAbsentMgmt, setShowAbsentMgmt] = useState(false);
+  // Substitusi: data kandidat & substitusi aktif milik saya
+  const [subCandidates, setSubCandidates] = useState<any>(null); // { myDay, myNextDate, candidates[] }
+  const [activeSub, setActiveSub] = useState<any>(null);         // substitusi pending/accepted saya sbg requester
+  const [subForMe, setSubForMe] = useState<any>(null);           // substitusi di mana saya jadi pengganti
+  const [showSubForm, setShowSubForm] = useState(false);
+  const [subSubmitting, setSubSubmitting] = useState(false);
+  const [selectedCandidate, setSelectedCandidate] = useState<any>(null);
 
-  const isPastTimeLimit = useMemo(() => {
+  const isPassCheckinLimit = useMemo(() => {
     if (settings.testing_mode === 'true') return false;
-    if (!settings.report_time_limit) return false;
-    const [limitH, limitM] = settings.report_time_limit.split(':').map(Number);
+    const limit = settings.checkin_time_limit || settings.report_time_limit || '07:00';
+    const [limitH, limitM] = limit.split(':').map(Number);
     const now = new Date();
     return now.getHours() > limitH || (now.getHours() === limitH && now.getMinutes() > limitM);
   }, [settings]);
+
+  const isPastCleaningLimit = useMemo(() => {
+    if (settings.testing_mode === 'true') return false;
+    const limit = settings.cleaning_time_limit || '08:00';
+    const [limitH, limitM] = limit.split(':').map(Number);
+    const now = new Date();
+    return now.getHours() > limitH || (now.getHours() === limitH && now.getMinutes() > limitM);
+  }, [settings]);
+
+  // Backward compat alias
+  const isPastTimeLimit = isPassCheckinLimit;
 
   const canEditReport = useCallback((report: Report) => {
     if (settings.testing_mode === 'true') return true;
@@ -1254,11 +1480,28 @@ const PJDashboard = ({ user }: { user: User }) => {
     fetchStatus();
     fetchMembers();
     fetchSettings();
+    fetchSubs();
     navigator.geolocation.getCurrentPosition((pos) => {
-      setLocation({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+      setLocation({
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+      });
       setDistance(getDistance(pos.coords.latitude, pos.coords.longitude, SCHOOL_LAT, SCHOOL_LON));
-    }, (err) => console.error("Geolocation error:", err));
+    }, (err) => console.error("Geolocation error:", err), { enableHighAccuracy: true, timeout: 10000 });
   }, [user.id]);
+
+  const fetchSubs = async () => {
+    try {
+      const [subs, cands] = await Promise.all([
+        safeFetch(`/api/substitutions?pj_id=${user.id}`),
+        safeFetch(`/api/substitutions/candidates/${user.id}`).catch(() => null),
+      ]);
+      setActiveSub(subs.find((s: any) => s.requester_pj_id === user.id && ['pending', 'accepted'].includes(s.status)) || null);
+      setSubForMe(subs.find((s: any) => s.substitute_pj_id === user.id && ['pending', 'accepted'].includes(s.status)) || null);
+      if (cands) setSubCandidates(cands);
+    } catch { }
+  };
 
   const fetchStatus = async () => {
     try {
@@ -1307,14 +1550,52 @@ const PJDashboard = ({ user }: { user: User }) => {
     formData.append('photo', photo);
     formData.append('latitude', (location?.lat || SCHOOL_LAT).toString());
     formData.append('longitude', (location?.lon || SCHOOL_LON).toString());
+    if (location?.accuracy) formData.append('accuracy', location.accuracy.toString());
+    if (location?.provider) formData.append('provider', location.provider);
     formData.append('time', time);
     formData.append('status', getStatus(time));
     try {
       const data = await safeFetch('/api/attendance', { method: 'POST', body: formData });
-      if (data.success) { confetti(); fetchStatus(); }
+      if (data.success) {
+        if (data.pending) {
+          toast.info('⏳ ' + (data.message || 'Absensi menunggu konfirmasi admin.'));
+        } else {
+          confetti(); toast.success('Absensi berhasil terkirim!');
+        }
+        fetchStatus();
+      }
       else toast.error(data.message);
     } catch (err: any) { toast.error(err.message || 'Gagal mengirim absensi'); }
     finally { setSubmitting(false); }
+  };
+
+  const handleSubSubmit = async () => {
+    if (!selectedCandidate || !subCandidates?.myNextDate) return;
+    setSubSubmitting(true);
+    try {
+      await safeFetch('/api/substitutions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requester_pj_id: user.id,
+          substitute_pj_id: selectedCandidate.id,
+          original_date: subCandidates.myNextDate,
+          substitute_date: selectedCandidate.their_next_date || null,
+        }),
+      });
+      toast.success('Permintaan pengganti terkirim ke admin!');
+      setShowSubForm(false);
+      setSelectedCandidate(null);
+      fetchSubs();
+    } catch (err: any) { toast.error(err.message); }
+    setSubSubmitting(false);
+  };
+
+  const handleSubCancel = async (subId: number) => {
+    try {
+      await safeFetch(`/api/substitutions/${subId}`, { method: 'DELETE' });
+      toast.success('Permintaan substitusi dibatalkan');
+      fetchSubs();
+    } catch (err: any) { toast.error(err.message); }
   };
 
   const handleReport = async () => {
@@ -1341,7 +1622,14 @@ const PJDashboard = ({ user }: { user: User }) => {
     formData.append('absentMembers', JSON.stringify([...absentPjMembers, ...absentList]));
     try {
       const data = await safeFetch('/api/report', { method: 'POST', body: formData });
-      if (data.success) { confetti(); fetchStatus(); setSelectedAbsentSchool([]); setSearchTerm(''); }
+      if (data.success) {
+        if (data.pending) {
+          toast.info('⏳ ' + (data.message || 'Laporan menunggu konfirmasi admin.'));
+        } else {
+          confetti(); toast.success('Laporan berhasil terkirim!');
+        }
+        fetchStatus(); setSelectedAbsentSchool([]); setSearchTerm('');
+      }
       else toast.error(data.message);
     } catch (err: any) { toast.error(err.message || 'Gagal mengirim laporan'); }
     finally { setSubmitting(false); }
@@ -1405,6 +1693,11 @@ const PJDashboard = ({ user }: { user: User }) => {
             <History size={16} />
             <span className="hidden sm:inline">Riwayat</span>
           </button>
+          <button onClick={() => setActiveView(activeView === 'jadwal_pelajaran' ? 'dashboard' : 'jadwal_pelajaran')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-bold transition-all ${activeView === 'jadwal_pelajaran' ? 'bg-emerald-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+            <BookOpenCheck size={16} />
+            <span className="hidden sm:inline">Pelajaran</span>
+          </button>
         </div>
       </header>
 
@@ -1414,7 +1707,10 @@ const PJDashboard = ({ user }: { user: User }) => {
         {!isAssignedToday && (
           <div className="p-5 bg-amber-50 border border-amber-200 rounded-4xl flex items-center gap-4 text-amber-800">
             <div className="w-10 h-10 bg-amber-100 rounded-2xl flex items-center justify-center shrink-0"><AlertTriangle size={20} /></div>
-            <div><p className="font-bold">Bukan Jadwal Anda</p><p className="text-sm font-medium opacity-80">Hari ini Anda tidak memiliki jadwal .</p></div>
+            <div>
+              <p className="font-bold">Bukan Jadwal Anda</p>
+              <p className="text-sm font-medium opacity-80">Hari ini Anda tidak memiliki jadwal. Jika Anda berhalangan pada hari jadwal Anda, gunakan fitur <strong>Substitusi</strong> di bawah.</p>
+            </div>
           </div>
         )}
         {isPastTimeLimit && !status && (
@@ -1617,6 +1913,13 @@ const PJDashboard = ({ user }: { user: User }) => {
           </motion.div>
         )}
 
+        {/* View: Jadwal Pelajaran (PJ read-only) */}
+        {activeView === 'jadwal_pelajaran' && (
+          <motion.div key="jadwal_pelajaran" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <PJJadwalPelajaranView />
+          </motion.div>
+        )}
+
         {/* View: Dashboard */}
         {activeView === 'dashboard' && (
           <motion.div key="dashboard" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
@@ -1681,8 +1984,11 @@ const PJDashboard = ({ user }: { user: User }) => {
                       <button onClick={handleAttendance} disabled={!photo || submitting || isPastTimeLimit || !isAssignedToday}
                         className="btn-primary w-full py-4 flex items-center justify-center gap-3">
                         {submitting ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> :
-                          !isAssignedToday ? 'Bukan Jadwal Anda' : isPastTimeLimit ? 'Absensi Ditutup' : 'Konfirmasi Kehadiran'}
+                          !isAssignedToday ? '⚠ Gunakan Substitusi Jika Berhalangan' : isPastTimeLimit ? 'Absensi Ditutup' : 'Konfirmasi Kehadiran'}
                       </button>
+                      {!isAssignedToday && (
+                        <p className="text-[10px] text-amber-600 font-bold text-center">Status kehadiran PJ terkunci. Wajib gunakan fitur substitusi di bawah jika berhalangan hadir pada jadwal Anda.</p>
+                      )}
                     </div>
                   )}
                 </section>
@@ -1722,11 +2028,36 @@ const PJDashboard = ({ user }: { user: User }) => {
                           <div className="absolute bottom-3 right-3 px-3 py-1 bg-black/50 backdrop-blur-md text-white text-[10px] font-bold rounded-full">Klik untuk perbesar</div>
                         </div>
                       )}
-                      {status.cleaning_description && (
+                      {status.cleaning_description && status.cleaning_description !== 'Semua anggota hadir' && (
                         <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Anggota Tidak Hadir</p>
-                          <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap">{status.cleaning_description}</p>
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Anggota Tidak Hadir</p>
+                          <table className="w-full text-xs border-collapse">
+                            <thead><tr className="bg-white">
+                              <th className="px-2 py-1 text-left font-bold text-slate-400 border border-slate-200 w-8">No</th>
+                              <th className="px-2 py-1 text-left font-bold text-slate-400 border border-slate-200">Nama</th>
+                              <th className="px-2 py-1 text-left font-bold text-slate-400 border border-slate-200">Keterangan</th>
+                              <th className="px-2 py-1 text-center font-bold text-slate-400 border border-slate-200">Frekuensi</th>
+                            </tr></thead>
+                            <tbody>
+                              {status.cleaning_description.split('\n').filter((l: string) => l.trim()).map((line: string, idx: number) => {
+                                const parts = line.split(' - ');
+                                const nama = parts[0]?.trim() || line;
+                                const ket = parts.slice(1).join(' - ').trim() || '-';
+                                return (
+                                  <tr key={idx} className={idx % 2 === 0 ? 'bg-slate-50' : 'bg-white'}>
+                                    <td className="px-2 py-1 text-center text-slate-400 border border-slate-200">{idx + 1}</td>
+                                    <td className="px-2 py-1 font-semibold text-slate-800 border border-slate-200">{nama}</td>
+                                    <td className="px-2 py-1 text-slate-600 border border-slate-200">{ket}</td>
+                                    <td className="px-2 py-1 text-center border border-slate-200"><span className="px-1 py-0.5 bg-red-50 text-red-600 rounded font-bold">1x</span></td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
+                      )}
+                      {status.cleaning_description === 'Semua anggota hadir' && (
+                        <div className="px-4 py-2 bg-emerald-50 rounded-xl inline-block text-emerald-700 text-xs font-bold">✓ Semua anggota hadir</div>
                       )}
                     </div>
                   ) : (
@@ -1743,25 +2074,102 @@ const PJDashboard = ({ user }: { user: User }) => {
                       {/* Anggota  */}
                       <div>
                         <div className="flex items-center justify-between mb-3">
-                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Users size={12} /> Anggota  Anda</p>
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Users size={12} /> Anggota Anda</p>
                           <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">{pjMembers.length} Orang</span>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {pjMembers.map(m => (
-                            <div key={m.id} className="flex flex-col gap-2 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                              <span className="text-sm font-bold text-slate-900">{m.name}</span>
-                              <CustomDropdown
-                                options={Object.values(MEMBER_STATUSES).map(s => ({ id: s, label: s }))}
-                                value={memberStatuses[m.id]?.status || MEMBER_STATUSES.HADIR}
-                                onChange={(val) => updateMemberStatus(m.id, val as MemberStatus)}
-                              />
+                        <div className="space-y-3">
+
+                          {/* ── Baris PJ (diri sendiri) ── */}
+                          <div className={`p-4 rounded-2xl border-2 transition-all ${activeSub ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${activeSub ? 'bg-amber-200' : 'bg-emerald-200'}`}>
+                                  <Shield size={15} className={activeSub ? 'text-amber-700' : 'text-emerald-700'} />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-sm font-bold text-slate-900 truncate">{user.name} <span className="text-[10px] font-bold text-slate-400 ml-1">PJ</span></p>
+                                  {activeSub
+                                    ? <p className="text-[10px] font-bold text-amber-600">Digantikan oleh {activeSub.substitute_name} · {activeSub.original_date}</p>
+                                    : subForMe
+                                    ? <p className="text-[10px] font-bold text-blue-600">Menggantikan {subForMe.requester_name} · {subForMe.original_date}</p>
+                                    : <p className="text-[10px] font-medium text-emerald-600">Hadir · Bertugas hari ini</p>}
+                                </div>
+                              </div>
+                              <div className="shrink-0">
+                                {activeSub
+                                  ? (activeSub.status === 'pending' &&
+                                    <button onClick={() => handleSubCancel(activeSub.id)}
+                                      className="flex items-center gap-1 px-2.5 py-1.5 bg-red-100 text-red-600 text-[10px] font-bold rounded-lg hover:bg-red-200 transition-all">
+                                      <X size={11} />Batalkan
+                                    </button>)
+                                  : !subForMe && subCandidates && (
+                                    <button onClick={() => setShowSubForm(!showSubForm)}
+                                      className={`flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold rounded-lg transition-all ${showSubForm ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'}`}>
+                                      <Shuffle size={11} />{showSubForm ? 'Tutup' : 'Tidak Bisa Piket'}
+                                    </button>
+                                  )}
+                              </div>
                             </div>
-                          ))}
-                          {pjMembers.length === 0 && (
-                            <div className="col-span-2 py-6 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                              <p className="text-xs text-slate-400 font-medium italic">Belum ada anggota yang ditugaskan</p>
-                            </div>
-                          )}
+
+                            {/* Form pilih pengganti */}
+                            <AnimatePresence>
+                              {showSubForm && !activeSub && subCandidates && (
+                                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                                  <div className="mt-3 pt-3 border-t border-purple-200 space-y-3">
+                                    <p className="text-[10px] font-bold text-purple-700 uppercase tracking-widest">Pilih Pengganti untuk {subCandidates.myDay} ({subCandidates.myNextDate})</p>
+                                    <p className="text-[10px] text-slate-500">Kelompok berikutnya diurutkan lebih dahulu. Mereka mengerjakan jadwal Anda, Anda mengerjakan jadwal mereka.</p>
+                                    <div className="space-y-2">
+                                      {subCandidates.candidates.map((c: any) => (
+                                        <button key={c.id} onClick={() => setSelectedCandidate(selectedCandidate?.id === c.id ? null : c)}
+                                          className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${selectedCandidate?.id === c.id ? 'bg-purple-100 border-purple-400' : 'bg-white border-slate-200 hover:border-purple-300'}`}>
+                                          <div>
+                                            <p className="text-xs font-bold text-slate-900">{c.name}</p>
+                                            <p className="text-[10px] text-slate-400">{c.group_name} · Jadwal: <strong>{c.day}</strong></p>
+                                          </div>
+                                          <div className="text-right shrink-0 ml-2">
+                                            {c.their_next_date
+                                              ? <p className="text-[10px] font-bold text-purple-600">Anda gantikan: {c.their_next_date}</p>
+                                              : <p className="text-[10px] text-slate-400 italic">Tanpa jadwal balik</p>}
+                                            {selectedCandidate?.id === c.id && <CheckCircle size={14} className="text-purple-600 mt-1 ml-auto" />}
+                                          </div>
+                                        </button>
+                                      ))}
+                                      {subCandidates.candidates.length === 0 && (
+                                        <p className="text-xs text-slate-400 italic text-center py-2">Tidak ada PJ lain yang terdaftar jadwal.</p>
+                                      )}
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <button onClick={() => { setShowSubForm(false); setSelectedCandidate(null); }}
+                                        className="flex-1 py-2 bg-white text-slate-500 text-xs font-bold rounded-xl border border-slate-200 hover:bg-slate-50">Batal</button>
+                                      <button onClick={handleSubSubmit} disabled={subSubmitting || !selectedCandidate}
+                                        className="flex-1 py-2 bg-purple-600 text-white text-xs font-bold rounded-xl hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-1.5">
+                                        {subSubmitting ? <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <><Shuffle size={12} />Kirim Permintaan</>}
+                                      </button>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+
+                          {/* ── Baris anggota biasa ── */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {pjMembers.map(m => (
+                              <div key={m.id} className="flex flex-col gap-2 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                <span className="text-sm font-bold text-slate-900">{m.name}</span>
+                                <CustomDropdown
+                                  options={Object.values(MEMBER_STATUSES).map(s => ({ id: s, label: s }))}
+                                  value={memberStatuses[m.id]?.status || MEMBER_STATUSES.HADIR}
+                                  onChange={(val) => updateMemberStatus(m.id, val as MemberStatus)}
+                                />
+                              </div>
+                            ))}
+                            {pjMembers.length === 0 && (
+                              <div className="col-span-2 py-6 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                                <p className="text-xs text-slate-400 font-medium italic">Belum ada anggota yang ditugaskan</p>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -1804,26 +2212,98 @@ const PJDashboard = ({ user }: { user: User }) => {
                         </div>
                       </div>
 
-                      <button onClick={handleReport} disabled={!cleaningPhoto || !status || submitting || !isAssignedToday}
+                      <button onClick={handleReport} disabled={!cleaningPhoto || !status || submitting || !isAssignedToday || isPastCleaningLimit}
                         className="btn-primary w-full py-4 flex items-center justify-center gap-3 text-base">
-                        {submitting ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <><CheckCircle2 size={20} />Kirim Laporan</>}
+                        {submitting ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : isPastCleaningLimit ? 'Laporan Ditutup' : <><CheckCircle2 size={20} />Kirim Laporan</>}
                       </button>
                       {!status && !isPastTimeLimit && isAssignedToday && <p className="text-center text-xs text-red-500 font-bold">⚠️ Harap absen kehadiran terlebih dahulu!</p>}
+                      {isPastCleaningLimit && <p className="text-center text-xs text-red-500 font-bold">⏰ Batas waktu laporan kebersihan ({settings.cleaning_time_limit || '08:00'} WIB) telah terlewati.</p>}
                     </div>
                   )}
                 </section>
 
-                {/* Substitution Panel - Hidden after report sent to keep dashboard clean */}
-                {!status?.cleaning_photo && (
-                  <div className="mt-6">
-                    <SubstitutionPanel user={user} schedules={schedules} />
-                  </div>
-                )}
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+};
+
+// --- PENDING APPROVALS SECTION ---
+const PendingApprovalsSection = () => {
+  const [pending, setPending] = React.useState<any[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try { setPending(await safeFetch('/api/pending-approvals')); } catch { }
+    setLoading(false);
+  };
+
+  React.useEffect(() => { load(); }, []);
+
+  const approve = async (id: number) => {
+    try {
+      await safeFetch(`/api/pending-approvals/${id}/approve`, { method: 'POST' });
+      toast.success('Data berhasil disetujui dan disimpan!');
+      load();
+    } catch (err: any) { toast.error(err.message); }
+  };
+
+  const reject = async (id: number) => {
+    try {
+      await safeFetch(`/api/pending-approvals/${id}/reject`, { method: 'POST' });
+      toast.info('Pengajuan ditolak.');
+      load();
+    } catch (err: any) { toast.error(err.message); }
+  };
+
+  if (loading) return null;
+  if (pending.length === 0) return (
+    <div className="mt-6 p-4 bg-emerald-50 rounded-2xl border border-emerald-100 text-center">
+      <p className="text-sm font-bold text-emerald-700">✓ Tidak ada data menunggu konfirmasi</p>
+    </div>
+  );
+
+  return (
+    <div className="mt-6 space-y-3">
+      <div className="flex items-center gap-2 mb-2">
+        <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+        <p className="text-sm font-black text-amber-700 uppercase tracking-widest">Menunggu Konfirmasi Admin ({pending.length})</p>
+      </div>
+      {pending.map((item: any) => {
+        const data = JSON.parse(item.data || '{}');
+        return (
+          <div key={item.id} className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-0.5 text-[10px] font-black rounded-full uppercase tracking-widest ${item.type === 'attendance' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                    {item.type === 'attendance' ? 'Absensi' : 'Laporan'}
+                  </span>
+                  <span className="text-xs font-bold text-amber-800">{item.pj_name}</span>
+                </div>
+                <p className="text-[10px] text-amber-600 font-medium mt-1">
+                  {item.type === 'attendance' ? `Pukul ${data.checkin_time} WIB · Status: ${data.status}` : `Tanggal: ${data.date}`}
+                </p>
+                <p className="text-[9px] text-amber-500 mt-0.5">{new Date(item.created_at).toLocaleString('id-ID')}</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => reject(item.id)}
+                className="flex-1 py-2 bg-white text-red-600 border border-red-200 text-xs font-bold rounded-xl hover:bg-red-50 transition-all">
+                ✗ Tolak
+              </button>
+              <button onClick={() => approve(item.id)}
+                className="flex-1 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl hover:bg-emerald-700 transition-all">
+                ✓ Setujui
+              </button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 };
@@ -1836,7 +2316,7 @@ const AdminDashboard = ({ user }: { user: User }) => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [settings, setSettings] = useState<any>({});
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'reports' | 'members' | 'users' | 'schedules' | 'violations' | 'settings'>('reports');
+  const [activeTab, setActiveTab] = useState<'reports' | 'members' | 'users' | 'schedules' | 'violations' | 'settings' | 'jadwal_pelajaran'>('reports');
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ type: string; id: number; name?: string; onConfirm?: () => void } | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -2040,6 +2520,7 @@ const AdminDashboard = ({ user }: { user: User }) => {
     { id: 'members', label: 'Anggota', icon: Users },
     { id: 'users', label: 'PJ ', icon: ShieldCheck },
     { id: 'schedules', label: 'Jadwal', icon: Calendar },
+    { id: 'jadwal_pelajaran', label: 'Pelajaran', icon: BookOpenCheck },
     { id: 'violations', label: 'Pelanggaran', icon: AlertTriangle },
     { id: 'settings', label: 'Pengaturan', icon: Settings }
   ];
@@ -2106,21 +2587,33 @@ const AdminDashboard = ({ user }: { user: User }) => {
                   <p className="text-sm font-bold text-slate-900">Notifikasi PJ</p>
                   <button onClick={() => setShowNotifications(false)} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"><X size={14} /></button>
                 </div>
-                <div className="max-h-64 overflow-y-auto divide-y divide-slate-50">
+                <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
                   {notifications.length === 0 ? (
                     <p className="text-center text-sm text-slate-400 font-medium py-6">Tidak ada notifikasi</p>
-                  ) : notifications.slice(0, 20).map((n: any) => (
-                    <div key={n.id} className={`px-4 py-3 flex items-start gap-3 transition-colors ${!n.is_read ? 'bg-amber-50' : 'hover:bg-slate-50'}`}>
-                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${n.type === 'attendance' ? 'bg-blue-100 text-blue-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                        {n.type === 'attendance' ? <MapPin size={14} /> : <ClipboardList size={14} />}
+                  ) : notifications.slice(0, 50).map((n: any) => (
+                    <div key={n.id} className={`px-4 py-3 flex items-start gap-3 transition-colors group ${!n.is_read ? 'bg-amber-50' : 'hover:bg-slate-50'}`}>
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${n.type === 'attendance' || n.type === 'attendance_pending' ? 'bg-blue-100 text-blue-600' : n.type === 'rejected' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                        {n.type === 'attendance' || n.type === 'attendance_pending' ? <MapPin size={14} /> : n.type === 'rejected' ? <AlertCircle size={14} /> : <ClipboardList size={14} />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-semibold text-slate-800 leading-snug">{n.message}</p>
                         <p className="text-[10px] text-slate-400 mt-0.5">{new Date(n.created_at).toLocaleString('id-ID')}</p>
                       </div>
+                      <button onClick={async () => { await safeFetch(`/api/notifications/${n.id}`, { method: 'DELETE' }); setNotifications(prev => prev.filter(x => x.id !== n.id)); }}
+                        className="p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100 shrink-0" title="Hapus notifikasi ini">
+                        <X size={12} />
+                      </button>
                     </div>
                   ))}
                 </div>
+                {notifications.length > 0 && (
+                  <div className="px-4 py-2 border-t border-slate-100">
+                    <button onClick={async () => { await safeFetch('/api/notifications/all', { method: 'DELETE' }); setNotifications([]); setUnreadCount(0); }}
+                      className="w-full py-2 text-[10px] font-bold text-red-500 hover:bg-red-50 rounded-xl transition-all uppercase tracking-widest border border-dashed border-red-200 hover:border-red-300">
+                      Hapus Semua Notifikasi
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2456,6 +2949,10 @@ const AdminDashboard = ({ user }: { user: User }) => {
         )}
 
         {/* VIOLATIONS TAB */}
+        {activeTab === 'jadwal_pelajaran' && (
+          <JadwalPelajaranTab />
+        )}
+
         {activeTab === 'violations' && (
           <ViolationsTab />
         )}
@@ -2465,17 +2962,31 @@ const AdminDashboard = ({ user }: { user: User }) => {
           <div className="p-6 sm:p-8 space-y-8">
             <h3 className="text-xl font-bold text-slate-900">Pengaturan Sistem</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Time limit */}
+              {/* Checkin time limit */}
               <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
                 <div className="flex items-center gap-3 mb-2">
-                  <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center"><Clock size={20} /></div>
+                  <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center"><MapPin size={20} /></div>
                   <div>
-                    <h4 className="font-bold text-slate-900">Batas Waktu Laporan</h4>
-                    <p className="text-xs text-slate-500 font-medium">PJ tidak bisa absen/lapor setelah jam ini.</p>
+                    <h4 className="font-bold text-slate-900">Deadline Absensi Kehadiran</h4>
+                    <p className="text-xs text-slate-500 font-medium">PJ tidak bisa absen setelah jam ini.</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <input type="time" className="input-field max-w-[150px]" value={settings.report_time_limit || '07:00'} onChange={(e) => updateSetting('report_time_limit', e.target.value)} />
+                  <input type="time" className="input-field max-w-[150px]" value={settings.checkin_time_limit || '07:00'} onChange={(e) => updateSetting('checkin_time_limit', e.target.value)} />
+                  <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">WIB</span>
+                </div>
+              </div>
+              {/* Cleaning report time limit */}
+              <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center"><ClipboardList size={20} /></div>
+                  <div>
+                    <h4 className="font-bold text-slate-900">Deadline Laporan Kebersihan</h4>
+                    <p className="text-xs text-slate-500 font-medium">PJ tidak bisa kirim laporan setelah jam ini.</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input type="time" className="input-field max-w-[150px]" value={settings.cleaning_time_limit || '17:25'} onChange={(e) => updateSetting('cleaning_time_limit', e.target.value)} />
                   <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">WIB</span>
                 </div>
               </div>
@@ -2514,7 +3025,51 @@ const AdminDashboard = ({ user }: { user: User }) => {
                   </div>
                 )}
               </div>
+              {/* Admin Confirmation Toggle */}
+              <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-red-100 text-red-600 rounded-xl flex items-center justify-center"><ShieldCheck size={20} /></div>
+                    <div>
+                      <h4 className="font-bold text-slate-900">Konfirmasi Admin</h4>
+                      <p className="text-xs text-slate-500 font-medium">Absen & laporan masuk antrian sebelum dikonfirmasi admin.</p>
+                    </div>
+                  </div>
+                  <button onClick={() => updateSetting('require_admin_confirm', settings.require_admin_confirm === 'true' ? 'false' : 'true')}
+                    className={`w-14 h-8 rounded-full transition-all relative shrink-0 ${settings.require_admin_confirm === 'true' ? 'bg-red-500' : 'bg-slate-300'}`}>
+                    <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all shadow-sm ${settings.require_admin_confirm === 'true' ? 'right-1' : 'left-1'}`} />
+                  </button>
+                </div>
+                {settings.require_admin_confirm === 'true' && (
+                  <div className="p-3 bg-red-50 text-red-700 text-[10px] font-bold rounded-xl border border-red-100 flex items-center gap-2">
+                    <ShieldCheck size={14} />KONFIRMASI ADMIN AKTIF — Data absen/laporan tidak langsung masuk database utama.
+                  </div>
+                )}
+              </div>
             </div>
+
+            {/* Weekly Archiver */}
+            <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4 col-span-1 md:col-span-2">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center"><Archive size={20} /></div>
+                <div>
+                  <h4 className="font-bold text-slate-900">Arsip Mingguan</h4>
+                  <p className="text-xs text-slate-500 font-medium">Arsipkan laporan & foto minggu lalu. Foto dihapus, data tersimpan.</p>
+                </div>
+              </div>
+              <button onClick={async () => {
+                try {
+                  const r = await safeFetch('/api/archive/weekly', { method: 'POST' });
+                  if (r.skipped) toast.info(r.message);
+                  else toast.success(`Berhasil arsip ${r.archivedReports} laporan (${r.weekStart} s/d ${r.weekEnd})`);
+                } catch (err: any) { toast.error(err.message); }
+              }} className="px-5 py-3 bg-indigo-600 text-white font-bold text-sm rounded-2xl hover:bg-indigo-700 transition-all flex items-center gap-2">
+                <Archive size={16} />Jalankan Arsip Minggu Lalu
+              </button>
+            </div>
+
+            {/* Pending Approvals Section */}
+            <PendingApprovalsSection />
           </div>
         )}
       </motion.div>
@@ -2530,6 +3085,189 @@ const AdminDashboard = ({ user }: { user: User }) => {
         title="Konfirmasi Tindakan"
         message={`Apakah Anda yakin ingin menghapus/mereset ${confirmAction?.name || 'data ini'}? Tindakan ini tidak dapat dibatalkan.`}
       />
+    </div>
+  );
+};
+
+// --- JADWAL PELAJARAN TAB (Admin CRUD) ---
+const JadwalPelajaranTab = () => {
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [form, setForm] = useState({ hari: 'Senin', jam_ke: 1, jam_mulai: '', jam_selesai: '', mata_pelajaran: '', guru: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [showImport, setShowImport] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try { setRows(await safeFetch('/api/jadwal-pelajaran')); } catch { }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleSave = async () => {
+    if (!form.mata_pelajaran.trim()) return;
+    setSubmitting(true);
+    try {
+      if (editingId) {
+        await safeFetch(`/api/jadwal-pelajaran/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+        toast.success('Jadwal diperbarui');
+      } else {
+        await safeFetch('/api/jadwal-pelajaran', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+        toast.success('Jadwal ditambahkan');
+      }
+      setShowForm(false); setEditingId(null);
+      setForm({ hari: 'Senin', jam_ke: 1, jam_mulai: '', jam_selesai: '', mata_pelajaran: '', guru: '' });
+      load();
+    } catch (err: any) { toast.error(err.message); }
+    setSubmitting(false);
+  };
+
+  const handleDelete = async (id: number) => {
+    try { await safeFetch(`/api/jadwal-pelajaran/${id}`, { method: 'DELETE' }); load(); toast.success('Dihapus'); } catch { }
+  };
+
+  const handleImport = async () => {
+    // Parse CSV: hari,jam_ke,jam_mulai,jam_selesai,mata_pelajaran,guru
+    const lines = importText.trim().split('\n').filter(Boolean);
+    const importRows = lines.map(l => {
+      const [hari, jam_ke, jam_mulai, jam_selesai, mata_pelajaran, guru] = l.split(',').map(s => s.trim());
+      return { hari, jam_ke: parseInt(jam_ke) || 1, jam_mulai, jam_selesai, mata_pelajaran, guru };
+    }).filter(r => r.hari && r.mata_pelajaran);
+    if (!importRows.length) { toast.error('Format tidak valid'); return; }
+    try {
+      await safeFetch('/api/jadwal-pelajaran/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: importRows }) });
+      toast.success(`${importRows.length} jadwal diimport`);
+      setShowImport(false); setImportText(''); load();
+    } catch (err: any) { toast.error(err.message); }
+  };
+
+  const byDay = DAYS_ORDER.reduce((acc: any, d) => {
+    acc[d] = rows.filter(r => r.hari === d).sort((a, b) => a.jam_ke - b.jam_ke);
+    return acc;
+  }, {});
+
+  return (
+    <div className="p-6 sm:p-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+        <div>
+          <h3 className="text-xl font-bold text-slate-900">Jadwal Pelajaran</h3>
+          <p className="text-sm text-slate-500 font-medium">{rows.length} mata pelajaran terdaftar</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => setShowImport(!showImport)} className="px-4 py-2.5 bg-blue-50 text-blue-600 text-xs font-bold rounded-xl border border-blue-100 hover:bg-blue-100 transition-all flex items-center gap-1.5">
+            <ClipboardPaste size={14} />Import CSV
+          </button>
+          <button onClick={async () => { if (confirm('Hapus semua jadwal pelajaran?')) { await safeFetch('/api/jadwal-pelajaran', { method: 'DELETE' }); load(); } }}
+            className="px-4 py-2.5 bg-red-50 text-red-600 text-xs font-bold rounded-xl border border-red-100 hover:bg-red-600 hover:text-white transition-all">Reset</button>
+          <button onClick={() => { setShowForm(true); setEditingId(null); setForm({ hari: 'Senin', jam_ke: 1, jam_mulai: '', jam_selesai: '', mata_pelajaran: '', guru: '' }); }}
+            className="btn-primary px-4 py-2.5 flex items-center gap-2 text-sm">
+            <Plus size={16} />Tambah
+          </button>
+        </div>
+      </div>
+
+      {/* Import CSV panel */}
+      <AnimatePresence>
+        {showImport && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mb-6 overflow-hidden">
+            <div className="p-5 bg-blue-50 border border-blue-100 rounded-2xl space-y-3">
+              <p className="text-xs font-bold text-blue-700 uppercase tracking-widest">Import CSV — Format: hari,jam_ke,jam_mulai,jam_selesai,mata_pelajaran,guru</p>
+              <textarea value={importText} onChange={e => setImportText(e.target.value)}
+                className="w-full h-28 p-3 bg-white border border-blue-200 rounded-xl text-xs font-mono outline-none resize-none"
+                placeholder={"Senin,1,07:00,07:45,Matematika,Bu Ani\nSenin,2,07:45,08:30,Bahasa Indonesia,Pak Budi"} />
+              <div className="flex gap-2">
+                <button onClick={handleImport} className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700 transition-all">Import</button>
+                <button onClick={() => setShowImport(false)} className="px-4 py-2 bg-white text-slate-500 text-xs font-bold rounded-xl border border-slate-200 hover:bg-slate-50 transition-all">Batal</button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Add/Edit Form */}
+      <AnimatePresence>
+        {showForm && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mb-8 overflow-hidden">
+            <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Hari</label>
+                  <select className="input-field text-sm" value={form.hari} onChange={e => setForm(p => ({ ...p, hari: e.target.value }))}>
+                    {DAYS_ORDER.map(d => <option key={d}>{d}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Jam ke-</label>
+                  <input type="number" min={1} max={12} className="input-field text-sm" value={form.jam_ke} onChange={e => setForm(p => ({ ...p, jam_ke: parseInt(e.target.value) || 1 }))} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Mata Pelajaran</label>
+                  <input type="text" className="input-field text-sm" placeholder="Matematika" value={form.mata_pelajaran} onChange={e => setForm(p => ({ ...p, mata_pelajaran: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Guru</label>
+                  <input type="text" className="input-field text-sm" placeholder="Nama guru" value={form.guru} onChange={e => setForm(p => ({ ...p, guru: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Jam Mulai</label>
+                  <input type="time" className="input-field text-sm" value={form.jam_mulai} onChange={e => setForm(p => ({ ...p, jam_mulai: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Jam Selesai</label>
+                  <input type="time" className="input-field text-sm" value={form.jam_selesai} onChange={e => setForm(p => ({ ...p, jam_selesai: e.target.value }))} />
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button onClick={handleSave} disabled={submitting || !form.mata_pelajaran.trim()} className="btn-primary px-6 py-2.5 text-sm disabled:opacity-50">{editingId ? 'Simpan' : 'Tambah'}</button>
+                <button onClick={() => { setShowForm(false); setEditingId(null); }} className="px-6 py-2.5 bg-white text-slate-500 font-bold text-sm rounded-2xl border border-slate-200 hover:bg-slate-50 transition-all">Batal</button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-20"><div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" /></div>
+      ) : rows.length === 0 ? (
+        <div className="py-20 text-center">
+          <BookOpenCheck size={40} className="text-slate-300 mx-auto mb-4" />
+          <p className="text-slate-400 font-medium">Belum ada jadwal pelajaran.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {DAYS_ORDER.filter(d => byDay[d].length > 0).map(day => (
+            <div key={day} className="bg-slate-50 rounded-3xl border border-slate-100 overflow-hidden">
+              <div className="px-6 py-3 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between">
+                <h4 className="font-bold text-emerald-800 text-sm uppercase tracking-widest">{day}</h4>
+                <span className="text-[10px] font-bold text-emerald-500">{byDay[day].length} jam</span>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {byDay[day].map((r: any) => (
+                  <div key={r.id} className="px-6 py-3 flex items-center gap-4 group hover:bg-white transition-colors">
+                    <div className="w-8 h-8 bg-white border border-slate-200 text-slate-600 rounded-lg flex items-center justify-center font-black text-sm shrink-0">{r.jam_ke}</div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-slate-900 text-sm">{r.mata_pelajaran}</p>
+                      {r.guru && <p className="text-xs text-slate-400 font-medium">{r.guru}</p>}
+                    </div>
+                    {(r.jam_mulai || r.jam_selesai) && (
+                      <span className="text-xs font-bold text-slate-400 shrink-0">{r.jam_mulai}{r.jam_selesai ? `–${r.jam_selesai}` : ''}</span>
+                    )}
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                      <button onClick={() => { setEditingId(r.id); setForm({ hari: r.hari, jam_ke: r.jam_ke, jam_mulai: r.jam_mulai || '', jam_selesai: r.jam_selesai || '', mata_pelajaran: r.mata_pelajaran, guru: r.guru || '' }); setShowForm(true); }}
+                        className="p-1.5 text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"><Edit2 size={14} /></button>
+                      <button onClick={() => handleDelete(r.id)} className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={14} /></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -2634,122 +3372,6 @@ const ViolationsTab = () => {
   );
 };
 
-// --- SUBSTITUTION PANEL for PJ Dashboard ---
-const SubstitutionPanel = ({ user, schedules }: { user: any; schedules: any[] }) => {
-  const [subs, setSubs] = useState<any[]>([]);
-  const [allPJs, setAllPJs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ substitute_pj_id: '', original_date: '', substitute_date: '' });
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [s, u] = await Promise.all([
-          safeFetch(`/api/substitutions?pj_id=${user.id}`),
-          safeFetch('/api/users')
-        ]);
-        setSubs(s);
-        setAllPJs(u.filter((u: any) => u.role === 'pj' && u.id !== user.id));
-      } catch { }
-      setLoading(false);
-    };
-    load();
-  }, [user.id]);
-
-  const handleSubmit = async () => {
-    if (!formData.substitute_pj_id || !formData.original_date) {
-      toast.error('Lengkapi data substitusi'); return;
-    }
-    setSubmitting(true);
-    try {
-      await safeFetch('/api/substitutions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requester_pj_id: user.id, ...formData })
-      });
-      toast.success('Permintaan substitusi terkirim');
-      setShowForm(false);
-      setFormData({ substitute_pj_id: '', original_date: '', substitute_date: '' });
-      const s = await safeFetch(`/api/substitutions?pj_id=${user.id}`);
-      setSubs(s);
-    } catch (err: any) { toast.error(err.message); }
-    finally { setSubmitting(false); }
-  };
-
-  const pendingDebts = subs.filter(s => s.requester_pj_id === user.id && s.status === 'pending').length;
-
-  if (loading) return null;
-
-  return (
-    <div className="bento-card p-4 bg-white space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center"><Shuffle size={20} /></div>
-          <div>
-            <h3 className="text-base font-bold text-slate-900">Substitusi Kelompok</h3>
-            {pendingDebts > 0 && <p className="text-xs text-amber-600 font-bold">Hutang aktif: {pendingDebts}x</p>}
-          </div>
-        </div>
-        <button onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-1.5 px-3 py-2 bg-purple-50 text-purple-600 text-xs font-bold rounded-xl border border-purple-100 hover:bg-purple-100 transition-all">
-          <Plus size={14} />Ajukan
-        </button>
-      </div>
-
-      {showForm && (
-        <div className="p-4 bg-purple-50 rounded-2xl border border-purple-100 space-y-3">
-          <p className="text-xs font-bold text-purple-800 uppercase tracking-widest">Form Tukar Jadwal</p>
-          <div className="grid grid-cols-1 gap-3">
-            <div>
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Tanggal Jadwal Saya</label>
-              <input type="date" className="input-field text-sm" value={formData.original_date} onChange={e => setFormData(p => ({ ...p, original_date: e.target.value }))} />
-            </div>
-            <div>
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">PJ Pengganti</label>
-              <CustomDropdown
-                options={[{ id: '', label: 'Pilih PJ...' }, ...allPJs.map(p => ({ id: p.id, label: p.name }))]}
-                value={formData.substitute_pj_id}
-                onChange={v => setFormData(p => ({ ...p, substitute_pj_id: v.toString() }))}
-              />
-            </div>
-            <div>
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Saya Gantikan (Opsional)</label>
-              <input type="date" className="input-field text-sm" value={formData.substitute_date} onChange={e => setFormData(p => ({ ...p, substitute_date: e.target.value }))} />
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 bg-white text-slate-500 text-sm font-bold rounded-xl border border-slate-200">Batal</button>
-            <button onClick={handleSubmit} disabled={submitting} className="flex-1 py-2.5 bg-purple-600 text-white text-sm font-bold rounded-xl hover:bg-purple-700 transition-all disabled:opacity-50">
-              {submitting ? 'Mengirim...' : 'Kirim'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {subs.length > 0 && (
-        <div className="space-y-2">
-          {subs.slice(0, 5).map((s: any) => {
-            const isRequester = s.requester_pj_id === user.id;
-            return (
-              <div key={s.id} className={`flex items-center gap-3 p-3 rounded-xl text-xs border ${s.status === 'completed' ? 'bg-emerald-50 border-emerald-100' : s.status === 'cancelled' ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-amber-50 border-amber-100'}`}>
-                <div className="flex-1">
-                  {isRequester
-                    ? <p className="font-semibold text-slate-700">Digantikan {s.substitute_name} pada {s.original_date}</p>
-                    : <p className="font-semibold text-slate-700">Menggantikan {s.requester_name} pada {s.original_date}</p>}
-                  {s.substitute_date && <p className="text-slate-400 mt-0.5">Balasan: {s.substitute_date}</p>}
-                </div>
-                <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] uppercase ${s.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : s.status === 'cancelled' ? 'bg-slate-200 text-slate-500' : 'bg-amber-100 text-amber-700'}`}>{s.status}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-};
-
 const ReportCard = ({ report, onDelete, onPreview, onReact }: { report: any; key?: any; onDelete: () => void; onPreview: (src: string) => void; onReact?: () => void }) => (
   <div className="p-5 sm:p-6 rounded-3xl border border-slate-100 bg-slate-50/30 hover:bg-slate-50 transition-colors group">
     <div className="flex flex-col lg:flex-row gap-6">
@@ -2801,8 +3423,35 @@ const ReportCard = ({ report, onDelete, onPreview, onReact }: { report: any; key
         </div>
         {report.cleaning_description && report.cleaning_description !== 'Semua anggota hadir' && (
           <div className="p-4 bg-white rounded-2xl border border-slate-100">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Anggota Tidak Hadir</p>
-            <p className="text-sm text-slate-600 whitespace-pre-wrap font-medium">{report.cleaning_description}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Anggota Tidak Hadir</p>
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-50">
+                  <th className="px-2 py-1.5 text-left font-bold text-slate-500 border border-slate-100 w-8">No</th>
+                  <th className="px-2 py-1.5 text-left font-bold text-slate-500 border border-slate-100">Nama</th>
+                  <th className="px-2 py-1.5 text-left font-bold text-slate-500 border border-slate-100">Keterangan</th>
+                  <th className="px-2 py-1.5 text-center font-bold text-slate-500 border border-slate-100 w-16">Frekuensi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.cleaning_description.split('\n').filter((l: string) => l.trim()).map((line: string, idx: number) => {
+                  const parts = line.split(' - ');
+                  const nama = parts[0]?.trim() || line;
+                  const ket = parts.slice(1).join(' - ').trim() || '-';
+                  const freq = (report.absents || []).filter((a: any) => a.name === nama).length || 1;
+                  return (
+                    <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+                      <td className="px-2 py-1.5 text-center text-slate-400 border border-slate-100 font-medium">{idx + 1}</td>
+                      <td className="px-2 py-1.5 font-semibold text-slate-800 border border-slate-100">{nama}</td>
+                      <td className="px-2 py-1.5 text-slate-600 border border-slate-100">{ket}</td>
+                      <td className="px-2 py-1.5 text-center border border-slate-100">
+                        <span className="px-1.5 py-0.5 bg-red-50 text-red-600 rounded font-bold">{freq}x</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
         {report.cleaning_description === 'Semua anggota hadir' && (
@@ -2861,6 +3510,7 @@ export default function App() {
   const [activeTestPage, setActiveTestPage] = useState(false);
   const [settings, setSettings] = useState<any>({});
   const [showAboutGlobal, setShowAboutGlobal] = useState(false);
+  const [isGuest, setIsGuest] = useState(false);
 
   useEffect(() => {
     safeFetch('/api/admin-exists').then(d => setAdminExists(d.exists)).catch(() => setAdminExists(false));
@@ -2875,6 +3525,7 @@ export default function App() {
 
   const handleLogout = () => {
     setUser(null);
+    setIsGuest(false);
     localStorage.removeItem('klasik_user');
     setActiveTestPage(false);
   };
@@ -2883,21 +3534,26 @@ export default function App() {
     setAdminExists(true);
   };
 
-  // Setup page
-  if (adminExists === false) return <SetupPage onSetup={handleSetup} />;
+  // Setup page — null means still loading (prevents race condition flash)
   if (adminExists === null) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
       <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin" />
     </div>
   );
+  if (adminExists === false) return <SetupPage onSetup={handleSetup} />;
+
+  // Guest mode
+  if (isGuest) return <GuestPanel onBack={() => setIsGuest(false)} />;
 
   // Login
-  if (!user) return <LoginPage onLogin={handleLogin} />;
+  if (!user) return <LoginPage onLogin={handleLogin} onGuest={() => setIsGuest(true)} />;
 
   const isTestingMode = settings.testing_mode === 'true';
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-12">
+    <div className="min-h-screen bg-slate-50 pb-12"
+      onContextMenu={isTestingMode ? undefined : (e) => e.preventDefault()}
+      style={{ userSelect: isTestingMode ? undefined : 'none', WebkitUserSelect: isTestingMode ? undefined : 'none' }}>
       <ToastContainer />
       {showAboutGlobal && <AboutModal onClose={() => setShowAboutGlobal(false)} />}
       <nav className="bg-white/80 backdrop-blur-md border-b border-slate-100 px-4 sm:px-6 py-4 sticky top-0 z-50">
