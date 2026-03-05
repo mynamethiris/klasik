@@ -450,12 +450,20 @@ async function startServer() {
     if (absentMembers) {
       const parsed = JSON.parse(absentMembers);
       const ins = db.prepare("INSERT INTO absent_members (report_id, member_id, name, reason) VALUES (?, ?, ?, ?)");
+      // Statuses yang masuk ke Laporan Anggota; 'Izin Telat' dicatat sebagai 'Telat'
+      const VIOLATION_STATUSES: Record<string, string> = {
+        'Alfa': 'Alfa',
+        'Sakit (Tanpa Surat)': 'Sakit (Tanpa Surat)',
+        'Izin Telat': 'Telat',
+        'Telat': 'Telat',
+      };
       parsed.forEach((m: any) => {
         ins.run(report.id, m.member_id || null, m.name, m.reason);
-        if (m.reason === 'Tidak Piket' || m.reason === 'Tidak Masuk') {
-          const existing = db.prepare("SELECT id FROM violations WHERE member_name = ? AND date = ? AND type = ?").get(m.name, today, m.reason);
+        const violationType = VIOLATION_STATUSES[m.reason];
+        if (violationType) {
+          const existing = db.prepare("SELECT id FROM violations WHERE member_name = ? AND date = ? AND type = ?").get(m.name, today, violationType);
           if (!existing) {
-            db.prepare("INSERT INTO violations (member_id, member_name, pj_id, date, type) VALUES (?, ?, ?, ?, ?)").run(m.member_id || null, m.name, pj_id, today, m.reason);
+            db.prepare("INSERT INTO violations (member_id, member_name, pj_id, date, type) VALUES (?, ?, ?, ?, ?)").run(m.member_id || null, m.name, pj_id, today, violationType);
           }
         }
       });
@@ -474,12 +482,9 @@ async function startServer() {
     if (!report) return res.status(404).json({ success: false, message: "Laporan tidak ditemukan" });
     const settings = db.prepare("SELECT value FROM settings WHERE key = 'edit_time_limit_minutes'").get() as any;
     const limitMin = parseInt(settings?.value || '15');
-    const testMode = db.prepare("SELECT value FROM settings WHERE key = 'testing_mode'").get() as any;
-    if (testMode?.value !== 'true') {
-      const submitted = new Date((report.submitted_at || '').includes('Z') ? report.submitted_at : report.submitted_at + 'Z');
-      const diff = (Date.now() - submitted.getTime()) / 60000;
-      if (diff > limitMin) return res.status(403).json({ success: false, message: `Batas waktu edit (${limitMin} menit) telah terlewati` });
-    }
+    const submitted = new Date((report.submitted_at || '').includes('Z') ? report.submitted_at : report.submitted_at + 'Z');
+    const diff = (Date.now() - submitted.getTime()) / 60000;
+    if (diff > limitMin) return res.status(403).json({ success: false, message: `Batas waktu edit (${limitMin} menit) telah terlewati` });
     if (!req.file) return res.status(400).json({ success: false, message: "Tidak ada foto" });
     let photoPath = "";
     try { photoPath = await compressImage(req.file.buffer, req.file.originalname); } catch { return res.status(500).json({ success: false, message: "Gagal kompresi foto" }); }
@@ -525,8 +530,8 @@ async function startServer() {
     const summary = db.prepare(`
       SELECT member_name, member_id,
         COUNT(*) as total_violations,
-        SUM(CASE WHEN type = 'Tidak Piket' THEN 1 ELSE 0 END) as tidak_piket,
-        SUM(CASE WHEN type = 'Tidak Masuk' THEN 1 ELSE 0 END) as tidak_masuk,
+        SUM(CASE WHEN type = 'Alfa' THEN 1 ELSE 0 END) as alfa,
+        SUM(CASE WHEN type = 'Sakit (Tanpa Surat)' THEN 1 ELSE 0 END) as sakit_tanpa_surat,
         SUM(CASE WHEN type = 'Telat' THEN 1 ELSE 0 END) as telat
       FROM violations GROUP BY member_name ORDER BY total_violations DESC
     `).all();
@@ -756,12 +761,12 @@ async function startServer() {
       VALUES (?, ?, ?, ?, 'pending')`)
       .run(requester_pj_id, substitute_pj_id, original_date, substitute_date || null);
 
-    const reqPJ  = db.prepare("SELECT name FROM users WHERE id = ?").get(requester_pj_id) as any;
-    const subPJ  = db.prepare("SELECT name FROM users WHERE id = ?").get(substitute_pj_id) as any;
+    const reqPJ = db.prepare("SELECT name FROM users WHERE id = ?").get(requester_pj_id) as any;
+    const subPJ = db.prepare("SELECT name FROM users WHERE id = ?").get(substitute_pj_id) as any;
     db.prepare("INSERT INTO admin_notifications (type, message, pj_id, pj_name) VALUES (?, ?, ?, ?)").run(
       'substitution',
       `${reqPJ?.name} meminta ${subPJ?.name} menggantikan piket pada ${original_date}` +
-        (substitute_date ? ` (balasan: ${substitute_date})` : ''),
+      (substitute_date ? ` (balasan: ${substitute_date})` : ''),
       requester_pj_id, reqPJ?.name || ''
     );
     res.json({ success: true });

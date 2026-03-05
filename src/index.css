@@ -14,7 +14,7 @@
 
 @layer components {
   .glass-card {
-    @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-xl shadow-slate-200/50 rounded-[2rem];
+    @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-xl shadow-slate-200/50 rounded-4xl;
   }
 
   .bento-card {

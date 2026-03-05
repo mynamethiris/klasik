@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, ReactNode, FormEvent } from 'react';
 import { User, ClassMember, Report, Schedule } from './types';
 import {
   LogIn, LayoutDashboard, ClipboardList, Users, LogOut, MapPin,
@@ -6,13 +6,14 @@ import {
   UserPlus, Trash2, RotateCcw, X, Search, Plus,
   Edit2, ChevronDown, Calendar, ShieldCheck, RefreshCw, ArrowRight, Settings,
   CheckCircle, AlertTriangle, Info, Eye, EyeOff, Copy, FolderOpen, Folder,
-  History, Image as ImageIcon, Maximize2, Key, FlaskConical,
+  History, Image as ImageIcon, Maximize2, Key,
   Shuffle, BookOpen, ClipboardPaste, UserX, BookOpenCheck, GraduationCap,
-  Archive, Bell, BellOff, Shield
+  Archive, Bell, BellOff, Shield, Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SCHOOL_LAT, SCHOOL_LON, MAX_DISTANCE_METERS, getDistance, getCurrentWIBTime, getStatus } from './constants';
-import confetti from 'canvas-confetti';
+import confettiLib from 'canvas-confetti';
+const confetti = (opts?: confettiLib.Options) => confettiLib(opts);
 
 // --- TOAST NOTIFICATION SYSTEM ---
 type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -38,7 +39,7 @@ const ToastContainer = () => {
     return () => { _toastDispatch = null; };
   }, []);
 
-  const icons: Record<ToastType, React.ReactNode> = {
+  const icons: Record<ToastType, ReactNode> = {
     success: <CheckCircle size={18} className="text-emerald-600" />,
     error: <AlertCircle size={18} className="text-red-500" />,
     info: <Info size={18} className="text-blue-500" />,
@@ -72,9 +73,11 @@ const ToastContainer = () => {
 
 // --- CONSTANTS ---
 const MEMBER_STATUSES = {
-  HADIR: 'Hadir', IZIN: 'Izin', SAKIT: 'Sakit',
-  TIDAK_MASUK: 'Tidak Masuk', IZIN_TELAT: 'Izin Telat', TIDAK_: 'Tidak ',
-  DISPEN: 'Dispen', ALFA: 'Alfa'
+  HADIR: 'Hadir',
+  SAKIT_SURAT: 'Sakit (Dengan Surat)',
+  SAKIT_TANPA: 'Sakit (Tanpa Surat)',
+  IZIN_TELAT: 'Izin Telat', DISPEN: 'Dispen',
+  ALFA: 'Alfa'
 } as const;
 type MemberStatus = typeof MEMBER_STATUSES[keyof typeof MEMBER_STATUSES];
 const DAYS_ORDER = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
@@ -159,7 +162,7 @@ const CustomDropdown = ({ options, value, onChange, placeholder = "Pilih...", cl
             <motion.div
               initial={{ opacity: 0, y: -4, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -4, scale: 0.97 }}
               transition={{ duration: 0.12 }}
-              className="absolute top-full left-0 right-0 mt-1.5 bg-white rounded-2xl shadow-2xl border border-slate-100 z-70 max-h-56 overflow-y-auto py-1.5"
+              className="absolute top-full left-0 right-0 mt-1.5 bg-white rounded-2xl shadow-2xl border border-slate-100 z-70 max-h-24 overflow-y-auto py-1.5"
               style={{ overscrollBehavior: 'contain' }}
             >
               {options.map(opt => (
@@ -342,15 +345,6 @@ const AboutModal = ({ onClose }: { onClose: () => void }) => {
           <p className="mt-1.5 text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: lwaModeActive ? 'rgba(252,211,77,0.7)' : '#64748b' }}>
             {lwaModeActive ? '~ Little Witch Academia ~' : '~ Manajemen Kelas · TKJT 1 ~'}
           </p>
-          {lwaModeActive && (
-            <motion.p
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mt-2 text-[11px] font-bold italic"
-              style={{ color: 'rgba(251,191,36,0.9)' }}>
-              ✦ Rahasia Terungkap! ✦
-            </motion.p>
-          )}
         </div>
 
         {/* Scrollable content — hidden scrollbar */}
@@ -447,9 +441,11 @@ const AboutModal = ({ onClose }: { onClose: () => void }) => {
             )}
           </div>
 
-          <p className="text-center text-[9px] font-medium" style={{ color: 'rgba(255,255,255,0.22)' }}>
-            @mynamethiris
-          </p>
+          {lwaModeActive && (
+            <p className="text-center text-[9px] font-medium" style={{ color: 'rgba(255,255,255,0.22)' }}>
+              @mynamethiris
+            </p>
+          )}
         </div>
       </motion.div>
     </div>
@@ -753,7 +749,7 @@ const AbsentManagementModal = ({ members, onClose }: { members: any[]; onClose: 
   const filtered = allMembers.filter(m => m.name.toLowerCase().includes(search.toLowerCase()) && !absentList.find(a => a.id === m.id));
 
   const addAbsent = (m: any) => {
-    setAbsentList(prev => [...prev, { id: m.id, name: m.name, reason: "Tidak Masuk" }]);
+    setAbsentList(prev => [...prev, { id: m.id, name: m.name, reason: "Alfa" }]);
     setSearch("");
     setShowSearch(false);
   };
@@ -809,14 +805,17 @@ const AbsentManagementModal = ({ members, onClose }: { members: any[]; onClose: 
             </div>
           ) : (
             absentList.map(a => (
-              <div key={a.id} className="flex items-center gap-3 p-4 bg-red-50 rounded-2xl border border-red-100">
-                <div className="w-8 h-8 bg-red-100 rounded-xl flex items-center justify-center text-red-600 font-bold text-sm shrink-0">{a.name.charAt(0)}</div>
-                <span className="text-sm font-bold text-red-900 flex-1">{a.name}</span>
-                <select value={a.reason} onChange={e => updateReason(a.id, e.target.value)}
-                  className="text-xs font-bold text-red-700 bg-white border border-red-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-red-300">
-                  {Object.values(MEMBER_STATUSES).filter(s => s !== MEMBER_STATUSES.HADIR).map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-                <button onClick={() => removeAbsent(a.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-xl transition-all"><X size={16} /></button>
+              <div key={a.id} className="flex flex-col gap-2 p-4 bg-red-50 rounded-2xl border border-red-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-red-100 rounded-xl flex items-center justify-center text-red-600 font-bold text-sm shrink-0">{a.name.charAt(0)}</div>
+                  <span className="text-sm font-bold text-red-900 flex-1">{a.name}</span>
+                  <button onClick={() => removeAbsent(a.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-xl transition-all"><X size={16} /></button>
+                </div>
+                <CustomDropdown
+                  options={Object.values(MEMBER_STATUSES).filter(s => s !== MEMBER_STATUSES.HADIR).map(s => ({ id: s, label: s }))}
+                  value={a.reason}
+                  onChange={val => updateReason(a.id, val as string)}
+                />
               </div>
             ))
           )}
@@ -911,7 +910,7 @@ const LoginPage = ({ onLogin, onGuest }: { onLogin: (user: User) => void; onGues
   const [loading, setLoading] = useState(false);
   const [showCode, setShowCode] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true); setError('');
     try {
@@ -1129,260 +1128,12 @@ const GuestPanel = ({ onBack }: { onBack: () => void }) => {
   );
 };
 
-// --- TESTING PAGE ---
-const TestingPage = () => {
-  const [settings, setSettings] = useState<any>({});
-  const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<any>(null);
-  const [testPjId, setTestPjId] = useState('');
-  const [users, setUsers] = useState<User[]>([]);
-  const [photo, setPhoto] = useState<File | null>(null);
-  const [cleaningPhoto, setCleaningPhoto] = useState<File | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [members, setMembers] = useState<ClassMember[]>([]);
-  const [memberStatuses, setMemberStatuses] = useState<Record<number, MemberStatus>>({});
-  const [searchTerm, setSearchTerm] = useState('');
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [selectedAbsentSchool, setSelectedAbsentSchool] = useState<ClassMember[]>([]);
-
-  useEffect(() => {
-    const fetchAll = async () => {
-      const [s, u, m] = await Promise.all([safeFetch('/api/settings'), safeFetch('/api/users'), safeFetch('/api/members')]);
-      setSettings(s); setUsers(u.filter((u: User) => u.role === 'pj')); setMembers(m);
-      setLoading(false);
-    };
-    fetchAll().catch(console.error);
-  }, []);
-
-  const fetchStatus = async (pjId: string) => {
-    if (!pjId) return;
-    const data = await safeFetch(`/api/status/${pjId}`);
-    setStatus(data);
-  };
-
-  const pjMembers = testPjId ? members.filter(m => m.pj_id === parseInt(testPjId)) : [];
-
-  const onSelectPj = (v: string) => {
-    setTestPjId(v.toString());
-    fetchStatus(v.toString());
-    // Reset member statuses for new PJ's members
-    const initial: Record<number, MemberStatus> = {};
-    members.filter(m => m.pj_id === parseInt(v)).forEach(m => { initial[m.id] = MEMBER_STATUSES.HADIR; });
-    setMemberStatuses(initial);
-    setSelectedAbsentSchool([]);
-  };
-
-  if (loading) return <div className="flex items-center justify-center h-64"><div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>;
-
-  if (settings.testing_mode !== 'true') {
-    return (
-      <div className="max-w-2xl mx-auto p-8 text-center">
-        <div className="w-20 h-20 bg-slate-100 rounded-3xl flex items-center justify-center mx-auto mb-6"><FlaskConical size={40} className="text-slate-400" /></div>
-        <h2 className="text-2xl font-bold text-slate-900 mb-3">Mode Testing Tidak Aktif</h2>
-        <p className="text-slate-500 font-medium">Aktifkan Test Mode di panel admin → Pengaturan untuk menggunakan halaman ini.</p>
-      </div>
-    );
-  }
-
-  const handleTestAttendance = async () => {
-    if (!testPjId || !photo) return;
-    setSubmitting(true);
-    const formData = new FormData();
-    formData.append('pj_id', testPjId);
-    formData.append('photo', photo);
-    // Bypass: gunakan koordinat sekolah (geofencing bypass)
-    formData.append('latitude', SCHOOL_LAT.toString());
-    formData.append('longitude', SCHOOL_LON.toString());
-    // Bypass: status selalu Tepat Waktu (timestamp bypass)
-    formData.append('time', '06:00');
-    formData.append('status', 'Tepat Waktu');
-    try {
-      await safeFetch('/api/attendance', { method: 'POST', body: formData });
-      await fetchStatus(testPjId);
-      confetti();
-    } catch (err: any) { toast.error(err.message || 'Gagal mengirim absensi'); }
-    finally { setSubmitting(false); }
-  };
-
-  const handleTestReport = async () => {
-    if (!testPjId || !cleaningPhoto) return;
-    setSubmitting(true);
-    // Build absent list from member statuses
-    const absentPjMembers = pjMembers.filter(m => memberStatuses[m.id] !== MEMBER_STATUSES.HADIR)
-      .map(m => ({ member_id: m.id, name: m.name, reason: memberStatuses[m.id] || MEMBER_STATUSES.TIDAK_MASUK }));
-    const absentSchool = selectedAbsentSchool.map(m => ({ member_id: m.id, name: m.name, reason: MEMBER_STATUSES.TIDAK_MASUK }));
-    const allAbsent = [...absentPjMembers, ...absentSchool];
-    const desc = allAbsent.length > 0 ? allAbsent.map(m => `${m.name} - ${m.reason}`).join('\n') : 'Semua anggota hadir';
-
-    const formData = new FormData();
-    formData.append('pj_id', testPjId);
-    formData.append('photo', cleaningPhoto);
-    formData.append('description', desc);
-    formData.append('absentMembers', JSON.stringify(allAbsent));
-    try {
-      await safeFetch('/api/report', { method: 'POST', body: formData });
-      await fetchStatus(testPjId);
-      confetti();
-    } catch (err: any) { toast.error(err.message || 'Gagal mengirim laporan'); }
-    finally { setSubmitting(false); }
-  };
-
-  return (
-    <div className="max-w-4xl mx-auto p-4 space-y-8">
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center"><FlaskConical size={24} /></div>
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">Halaman Simulasi Testing</h2>
-          <p className="text-sm text-blue-600 font-bold">Mode testing aktif — Lokasi, Timestamp & Jadwal diabaikan</p>
-        </div>
-      </div>
-      <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-2xl">
-        <div className="flex items-start gap-3">
-          <Info size={16} className="text-blue-600 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-xs font-black text-blue-800 uppercase tracking-widest mb-1">⚠ Zona Testing Terisolasi</p>
-            <p className="text-xs text-blue-700 font-medium leading-relaxed">Data yang dikirim melalui halaman ini <strong>tetap masuk ke database</strong> (dengan flag testing). Akun PJ asli tidak dapat melihat atau mengakses laporan testing ini. Hapus data testing setelah selesai via tab Laporan.</p>
-          </div>
-        </div>
-      </div>
-
-      {/* PJ selector */}
-      <div className="bento-card p-6 space-y-4 bg-white" style={{ overflow: "visible" }}>
-        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Pilih PJ untuk Simulasi</label>
-        <CustomDropdown
-          options={[{ id: '', label: 'Pilih PJ...' }, ...users.map(u => ({ id: u.id, label: `${u.name} (${u.group_name})` }))]}
-          value={testPjId}
-          onChange={(v) => onSelectPj(v.toString())}
-        />
-        {status && (
-          <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 text-sm flex gap-4 flex-wrap">
-            <div><span className="font-bold text-blue-700">Checkin:</span> <span className="text-blue-600">{status.checkin_time || '—'}</span></div>
-            <div><span className="font-bold text-blue-700">Laporan:</span> <span className="text-blue-600">{status.cleaning_photo ? '✓ Terkirim' : '✗ Belum'}</span></div>
-            <div><span className="font-bold text-blue-700">Status:</span> <span className="text-blue-600">{status.status || '—'}</span></div>
-          </div>
-        )}
-      </div>
-
-      {testPjId && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Absensi Simulasi */}
-          <div className="bento-card p-6 bg-white space-y-5" style={{ overflow: "visible" }}>
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center"><MapPin size={18} /></div>
-              <h3 className="font-bold text-slate-900">Simulasi Absensi Kehadiran</h3>
-            </div>
-            <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl text-[10px] font-bold text-blue-600 uppercase tracking-widest flex gap-2">
-              <Info size={12} className="shrink-0 mt-0.5" />Bypass: Lokasi otomatis diisi koordinat sekolah · Waktu diset 06:00 (Tepat Waktu)
-            </div>
-            <label className="flex flex-col items-center p-6 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 cursor-pointer hover:border-blue-400 transition-all">
-              <Camera size={24} className="text-slate-400 mb-2" />
-              <span className="text-xs font-medium text-slate-500">{photo ? photo.name : 'Pilih foto kehadiran'}</span>
-              <input type="file" accept="image/*" className="hidden" onChange={(e) => setPhoto(e.target.files?.[0] || null)} />
-            </label>
-            {photo && (
-              <div className="rounded-xl overflow-hidden aspect-video bg-slate-100">
-                <img src={URL.createObjectURL(photo)} alt="Preview" className="w-full h-full object-cover" />
-              </div>
-            )}
-            <button onClick={handleTestAttendance} disabled={!photo || submitting || !!status?.checkin_time}
-              className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all disabled:opacity-50 text-sm">
-              {status?.checkin_time ? '✓ Sudah Absen' : submitting ? 'Mengirim...' : 'Kirim Absensi Simulasi'}
-            </button>
-          </div>
-
-          {/* Laporan Simulasi */}
-          <div className="bento-card p-6 bg-white space-y-5" style={{ overflow: "visible" }}>
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center"><ClipboardList size={18} /></div>
-              <h3 className="font-bold text-slate-900">Simulasi Laporan Kebersihan</h3>
-            </div>
-            <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl text-[10px] font-bold text-amber-600 uppercase tracking-widest flex gap-2">
-              <Info size={12} className="shrink-0 mt-0.5" />Bypass: Jadwal tidak dicek · Status anggota bisa diatur
-            </div>
-            <label className="flex flex-col items-center p-6 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 cursor-pointer hover:border-amber-400 transition-all">
-              <Camera size={24} className="text-slate-400 mb-2" />
-              <span className="text-xs font-medium text-slate-500">{cleaningPhoto ? cleaningPhoto.name : 'Pilih foto kebersihan'}</span>
-              <input type="file" accept="image/*" className="hidden" onChange={(e) => setCleaningPhoto(e.target.files?.[0] || null)} />
-            </label>
-            {cleaningPhoto && (
-              <div className="rounded-xl overflow-hidden aspect-video bg-slate-100">
-                <img src={URL.createObjectURL(cleaningPhoto)} alt="Preview" className="w-full h-full object-cover" />
-              </div>
-            )}
-
-            {/* Member status management */}
-            {pjMembers.length > 0 && (
-              <div className="space-y-3">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Users size={12} />Status Anggota </p>
-                <div className="space-y-2">
-                  {pjMembers.map(m => (
-                    <div key={m.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                      <span className="text-sm font-bold text-slate-800 flex-1">{m.name}</span>
-                      <CustomDropdown
-                        className="w-40"
-                        options={[MEMBER_STATUSES.HADIR, MEMBER_STATUSES.SAKIT, MEMBER_STATUSES.IZIN, MEMBER_STATUSES.TIDAK_MASUK, MEMBER_STATUSES.IZIN_TELAT, MEMBER_STATUSES.TIDAK_].map(s => ({ id: s, label: s }))}
-                        value={memberStatuses[m.id] || MEMBER_STATUSES.HADIR}
-                        onChange={(val) => setMemberStatuses(prev => ({ ...prev, [m.id]: val as MemberStatus }))}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Absent school members */}
-            <div className="space-y-2">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><AlertCircle size={12} />Anggota Kelas Tidak Masuk</p>
-              <div className="relative">
-                <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-50 rounded-xl border border-slate-200 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-400">
-                  <Search size={16} className="text-slate-400" />
-                  <input type="text" placeholder="Cari nama..." className="flex-1 bg-transparent outline-none text-sm font-medium"
-                    value={searchTerm}
-                    onChange={(e) => { setSearchTerm(e.target.value); setShowSuggestions(true); }}
-                    onFocus={() => setShowSuggestions(true)} />
-                </div>
-                <AnimatePresence>
-                  {showSuggestions && searchTerm.length > 0 && (
-                    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
-                      className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-2xl border border-slate-100 z-80 max-h-40 overflow-y-auto py-1">
-                      {members.filter(m => m.name.toLowerCase().includes(searchTerm.toLowerCase()))
-                        .filter(m => !selectedAbsentSchool.find(s => s.id === m.id))
-                        .filter(m => !pjMembers.find(p => p.id === m.id))
-                        .filter(m => !m.is_pj_group)
-                        .map(m => (
-                          <button key={m.id} onClick={() => { setSelectedAbsentSchool(prev => [...prev, m]); setSearchTerm(''); setShowSuggestions(false); }}
-                            className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">{m.name}</button>
-                        ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {selectedAbsentSchool.map(m => (
-                  <div key={m.id} className="flex items-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-700 rounded-lg border border-red-100">
-                    <span className="text-xs font-bold">{m.name}</span>
-                    <button onClick={() => setSelectedAbsentSchool(prev => prev.filter(s => s.id !== m.id))} className="hover:bg-red-100 rounded-full"><X size={10} /></button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <button onClick={handleTestReport} disabled={!cleaningPhoto || submitting || !status?.checkin_time || !!status?.cleaning_photo}
-              className="w-full py-3 bg-amber-600 text-white font-bold rounded-xl hover:bg-amber-700 transition-all disabled:opacity-50 text-sm">
-              {status?.cleaning_photo ? '✓ Laporan Terkirim' : !status?.checkin_time ? '⚠ Absen dulu sebelum lapor' : submitting ? 'Mengirim...' : 'Kirim Laporan Simulasi'}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 
 // --- PJ JADWAL PELAJARAN (Read Only) ---
 const PJJadwalPelajaranView = () => {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { safeFetch('/api/jadwal-pelajaran').then(setRows).catch(() => {}).finally(() => setLoading(false)); }, []);
+  useEffect(() => { safeFetch('/api/jadwal-pelajaran').then(setRows).catch(() => { }).finally(() => setLoading(false)); }, []);
   const byDay = DAYS_ORDER.reduce((acc: any, d) => { acc[d] = rows.filter(r => r.hari === d).sort((a: any, b: any) => a.jam_ke - b.jam_ke); return acc; }, {});
   if (loading) return <div className="flex items-center justify-center py-20"><div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" /></div>;
   if (rows.length === 0) return (
@@ -1415,6 +1166,75 @@ const PJJadwalPelajaranView = () => {
   );
 };
 
+// --- TIPS MODAL ---
+const TipsModal = ({ type, onClose }: { type: 'absen' | 'laporan'; onClose: () => void }) => {
+  const content = type === 'absen' ? {
+    title: 'Tips Cara Absen',
+    icon: <MapPin size={24} className="text-blue-600" />,
+    color: 'blue',
+    steps: [
+      { icon: '📍', title: 'Pastikan Lokasi Aktif', desc: 'Aktifkan GPS/lokasi di HP kamu. Absen hanya bisa dilakukan dalam jarak maksimal dari sekolah.' },
+      { icon: '📷', title: 'Ambil Foto Kehadiran', desc: 'Tekan "Ambil Foto Kehadiran", pastikan wajahmu terlihat jelas di foto.' },
+      { icon: '⏰', title: 'Absen Tepat Waktu', desc: 'Absen sebelum batas waktu yang ditentukan admin. Status otomatis berubah jika terlambat.' },
+      { icon: '✅', title: 'Konfirmasi Kehadiran', desc: 'Setelah foto dipilih dan lokasi terdeteksi, tekan tombol "Konfirmasi Kehadiran".' },
+    ]
+  } : {
+    title: 'Tips Cara Melapor',
+    icon: <ClipboardList size={24} className="text-amber-600" />,
+    color: 'amber',
+    steps: [
+      { icon: '🧹', title: 'Setelah Piket Selesai', desc: 'Pastikan kelas sudah bersih sebelum mengambil foto laporan.' },
+      { icon: '📷', title: 'Foto Hasil Kebersihan', desc: 'Ambil foto kelas yang sudah dibersihkan. Pastikan foto menunjukkan kondisi kelas dengan jelas.' },
+      { icon: '👥', title: 'Isi Status Anggota', desc: 'Pilih status hadir/tidak hadir untuk setiap anggota kelompokmu. Jika ada yang sakit/izin, pilih keterangan yang sesuai.' },
+      { icon: '📝', title: 'Tandai Anggota Kelas', desc: 'Jika ada anggota kelas lain yang tidak masuk sekolah hari ini, cari namanya di kolom pencarian.' },
+      { icon: '📤', title: 'Kirim Laporan', desc: 'Tekan "Kirim Laporan" untuk mengirim. Pastikan sudah absen kehadiran terlebih dahulu.' },
+    ]
+  };
+
+  const colorMap: Record<string, string> = {
+    blue: 'bg-blue-50 border-blue-200 text-blue-700',
+    amber: 'bg-amber-50 border-amber-200 text-amber-700',
+  };
+
+  return (
+    <div className="fixed inset-0 z-100 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4">
+      <motion.div
+        initial={{ opacity: 0, y: 60 }} animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 60 }}
+        transition={{ type: 'spring', damping: 24, stiffness: 280 }}
+        className="bg-white w-full sm:max-w-md rounded-t-4xl sm:rounded-4xl shadow-2xl overflow-hidden"
+        style={{ maxHeight: '90dvh' }}>
+        <div className="flex justify-center pt-3 sm:hidden"><div className="w-9 h-1 bg-slate-200 rounded-full" /></div>
+        <div className="px-5 py-5 sm:px-6 sm:py-6 overflow-y-auto" style={{ maxHeight: 'calc(90dvh - 2rem)' }}>
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${type === 'absen' ? 'bg-blue-50' : 'bg-amber-50'}`}>
+                {content.icon}
+              </div>
+              <h3 className="text-lg font-black text-slate-900">{content.title}</h3>
+            </div>
+            <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all"><X size={18} /></button>
+          </div>
+          <div className="space-y-3">
+            {content.steps.map((step, i) => (
+              <div key={i} className={`flex gap-3 p-4 rounded-2xl border ${type === 'absen' ? 'bg-blue-50/50 border-blue-100' : 'bg-amber-50/50 border-amber-100'}`}>
+                <span className="text-xl shrink-0 mt-0.5">{step.icon}</span>
+                <div>
+                  <p className={`text-sm font-bold mb-1 ${type === 'absen' ? 'text-blue-900' : 'text-amber-900'}`}>{step.title}</p>
+                  <p className="text-xs text-slate-600 leading-relaxed">{step.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={onClose} className={`w-full mt-5 py-3.5 font-bold text-sm rounded-2xl text-white transition-all ${type === 'absen' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-amber-500 hover:bg-amber-600'}`}>
+            Mengerti!
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 // --- PJ DASHBOARD ---
 const PJDashboard = ({ user }: { user: User }) => {
   const [status, setStatus] = useState<any>(null);
@@ -1432,15 +1252,19 @@ const PJDashboard = ({ user }: { user: User }) => {
   const [isAssignedToday, setIsAssignedToday] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [selectedAbsentSchool, setSelectedAbsentSchool] = useState<ClassMember[]>([]);
+  const [selectedAbsentSchool, setSelectedAbsentSchool] = useState<{ member: ClassMember; reason: MemberStatus }[]>([]);
   const [activeView, setActiveView] = useState<'dashboard' | 'history' | 'schedule' | 'jadwal_pelajaran'>('dashboard');
   const [history, setHistory] = useState<Report[]>([]);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [editingReport, setEditingReport] = useState<Report | null>(null);
   const [editPhoto, setEditPhoto] = useState<File | null>(null);
   const [editPhotoType, setEditPhotoType] = useState<'cleaning' | 'checkin'>('cleaning');
+  const [editAbsents, setEditAbsents] = useState<{ member: ClassMember; reason: MemberStatus }[]>([]);
+  const [editAbsentSearch, setEditAbsentSearch] = useState('');
+  const [editAbsentShowSugg, setEditAbsentShowSugg] = useState(false);
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [showAbsentMgmt, setShowAbsentMgmt] = useState(false);
+  const [showTips, setShowTips] = useState<'absen' | 'laporan' | null>(null);
   // Substitusi: data kandidat & substitusi aktif milik saya
   const [subCandidates, setSubCandidates] = useState<any>(null); // { myDay, myNextDate, candidates[] }
   const [activeSub, setActiveSub] = useState<any>(null);         // substitusi pending/accepted saya sbg requester
@@ -1448,33 +1272,82 @@ const PJDashboard = ({ user }: { user: User }) => {
   const [showSubForm, setShowSubForm] = useState(false);
   const [subSubmitting, setSubSubmitting] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<any>(null);
+  const [emergencyModeUntil, setEmergencyModeUntil] = useState<number | null>(() => {
+    const saved = localStorage.getItem('emergency_mode_until');
+    return saved ? parseInt(saved) : null;
+  });
+
+  const isEmergencyActive = useMemo(() => {
+    // Check server-side bypass (admin-activated with optional expiry)
+    if (settings.bypass_time === 'true') {
+      const expiresAt = parseInt(settings.bypass_expires_at || '0');
+      if (expiresAt === 0 || Date.now() <= expiresAt) return true;
+    }
+    // Check local emergency mode (PJ-activated)
+    if (!emergencyModeUntil) return false;
+    if (Date.now() > emergencyModeUntil) {
+      localStorage.removeItem('emergency_mode_until');
+      return false;
+    }
+    return true;
+  }, [emergencyModeUntil, settings]);
+
+  // Cleanup effect for emergency mode
+  useEffect(() => {
+    if (emergencyModeUntil) {
+      const remaining = emergencyModeUntil - Date.now();
+      if (remaining > 0) {
+        const timer = setTimeout(() => setEmergencyModeUntil(null), remaining);
+        return () => clearTimeout(timer);
+      } else {
+        setEmergencyModeUntil(null);
+        localStorage.removeItem('emergency_mode_until');
+      }
+    }
+  }, [emergencyModeUntil]);
+
+  const activateEmergencyMode = () => {
+    const durationMin = parseInt(settings.bypass_duration_minutes || '15');
+    const until = Date.now() + durationMin * 60 * 1000;
+    setEmergencyModeUntil(until);
+    localStorage.setItem('emergency_mode_until', until.toString());
+    toast.success(`Mode Tanpa Batasan Aktif (${durationMin} Menit)`);
+  };
 
   const isPassCheckinLimit = useMemo(() => {
-    if (settings.testing_mode === 'true') return false;
+    if (isEmergencyActive) return false;
     const limit = settings.checkin_time_limit || settings.report_time_limit || '07:00';
     const [limitH, limitM] = limit.split(':').map(Number);
     const now = new Date();
     return now.getHours() > limitH || (now.getHours() === limitH && now.getMinutes() > limitM);
-  }, [settings]);
+  }, [settings, isEmergencyActive]);
 
   const isPastCleaningLimit = useMemo(() => {
-    if (settings.testing_mode === 'true') return false;
+    if (isEmergencyActive) return false;
     const limit = settings.cleaning_time_limit || '08:00';
     const [limitH, limitM] = limit.split(':').map(Number);
     const now = new Date();
     return now.getHours() > limitH || (now.getHours() === limitH && now.getMinutes() > limitM);
-  }, [settings]);
+  }, [settings, isEmergencyActive]);
 
   // Backward compat alias
   const isPastTimeLimit = isPassCheckinLimit;
 
   const canEditReport = useCallback((report: Report) => {
-    if (settings.testing_mode === 'true') return true;
     if (!report.submitted_at) return false;
     const limitMin = parseInt(settings.edit_time_limit_minutes || '15');
     const submittedAt = new Date((report.submitted_at.includes('Z') ? report.submitted_at : report.submitted_at + 'Z'));
     return (Date.now() - submittedAt.getTime()) / 60000 <= limitMin;
   }, [settings]);
+
+  // Ticker for real-time countdown
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (isEmergencyActive) {
+      const interval = setInterval(() => setTick(t => t + 1), 1000);
+      return () => clearInterval(interval);
+    }
+  }, [isEmergencyActive]);
 
   useEffect(() => {
     fetchStatus();
@@ -1489,6 +1362,10 @@ const PJDashboard = ({ user }: { user: User }) => {
       });
       setDistance(getDistance(pos.coords.latitude, pos.coords.longitude, SCHOOL_LAT, SCHOOL_LON));
     }, (err) => console.error("Geolocation error:", err), { enableHighAccuracy: true, timeout: 10000 });
+
+    // Poll settings every 30s so PJ gets server bypass updates in real-time
+    const settingsPoller = setInterval(fetchSettings, 30000);
+    return () => clearInterval(settingsPoller);
   }, [user.id]);
 
   const fetchSubs = async () => {
@@ -1539,7 +1416,8 @@ const PJDashboard = ({ user }: { user: User }) => {
 
   const handleAttendance = async () => {
     if (!photo) return;
-    if (settings.testing_mode !== 'true' && distance! > MAX_DISTANCE_METERS) {
+    const isInsideSchool = distance !== null && distance <= MAX_DISTANCE_METERS;
+    if (!isInsideSchool && !isEmergencyActive) {
       toast.error(`Jarak terlalu jauh (${Math.round(distance!)}m). Maksimal ${MAX_DISTANCE_METERS}m dari sekolah.`);
       return;
     }
@@ -1601,7 +1479,7 @@ const PJDashboard = ({ user }: { user: User }) => {
   const handleReport = async () => {
     if (!cleaningPhoto) return;
     setSubmitting(true);
-    const absentList: any[] = selectedAbsentSchool.map(m => ({ member_id: m.id, name: m.name, reason: MEMBER_STATUSES.TIDAK_MASUK }));
+    const absentList: any[] = selectedAbsentSchool.map(({ member, reason }) => ({ member_id: member.id, name: member.name, reason }));
     const pjMembers = allMembers.filter(m => m.pj_id === user.id);
     const absentPjMembers = pjMembers.filter(m => memberStatuses[m.id]?.status !== MEMBER_STATUSES.HADIR)
       .map(m => ({ member_id: m.id, name: m.name, reason: memberStatuses[m.id]?.status }));
@@ -1636,22 +1514,35 @@ const PJDashboard = ({ user }: { user: User }) => {
   };
 
   const handleEditPhoto = async () => {
-    if (!editPhoto || !editingReport) return;
+    if (!editingReport) return;
     setEditSubmitting(true);
-    const formData = new FormData();
-    formData.append('photo', editPhoto);
-    formData.append('photoType', editPhotoType);
     try {
-      await safeFetch(`/api/report/${editingReport.id}/edit-photo`, { method: 'POST', body: formData });
+      // Save photo if changed
+      if (editPhoto) {
+        const formData = new FormData();
+        formData.append('photo', editPhoto);
+        formData.append('photoType', editPhotoType);
+        await safeFetch(`/api/report/${editingReport.id}/edit-photo`, { method: 'POST', body: formData });
+      }
+      // Save absent members
+      const absentList = editAbsents.map(({ member, reason }) => ({ member_id: member.id, name: member.name, reason }));
+      const allPjMembers = allMembers.filter(m => m.pj_id === user.id);
+      const desc = absentList.length > 0 ? absentList.map(a => `${a.name} - ${a.reason}`).join('\n') : 'Semua anggota hadir';
+      await safeFetch(`/api/report/${editingReport.id}/edit-absents`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ absentMembers: absentList, description: desc })
+      });
       await fetchHistory();
       setEditingReport(null);
       setEditPhoto(null);
-    } catch (err: any) { toast.error(err.message); }
+      setEditAbsents([]);
+      toast.success('Laporan berhasil diperbarui!');
+    } catch (err: any) { toast.error(err.message || 'Gagal menyimpan perubahan'); }
     finally { setEditSubmitting(false); }
   };
 
   const updateMemberStatus = (id: number, status: MemberStatus) => setMemberStatuses(prev => ({ ...prev, [id]: { status } }));
-  const removeSelectedAbsent = (id: number) => setSelectedAbsentSchool(prev => prev.filter(m => m.id !== id));
+  const removeSelectedAbsent = (id: number) => setSelectedAbsentSchool(prev => prev.filter(item => item.member.id !== id));
 
   if (loading) return (
     <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
@@ -1666,62 +1557,135 @@ const PJDashboard = ({ user }: { user: User }) => {
     <div className="max-w-4xl mx-auto p-4 space-y-6">
       {previewImage && <ImagePreviewModal src={previewImage} onClose={() => setPreviewImage(null)} />}
       {showAbsentMgmt && <AbsentManagementModal members={allMembers} onClose={() => setShowAbsentMgmt(false)} />}
+      <AnimatePresence>
+        {showTips && <TipsModal type={showTips} onClose={() => setShowTips(null)} />}
+      </AnimatePresence>
 
       {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">Halo, {user.name} 👋</h2>
-          <p className="text-slate-500 font-medium mt-1 text-sm sm:text-base">Selamat bertugas sebagai PJ  hari ini.</p>
+          <p className="text-slate-500 font-medium mt-1 text-sm sm:text-base">Selamat bertugas hari ini.</p>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
           <div className="glass-card px-4 py-2.5 flex items-center gap-3">
             <div className="text-right">
               <p className="text-lg font-mono font-bold text-emerald-600 tracking-tighter">{getCurrentWIBTime()}</p>
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">WIB</p>
             </div>
             <div className="w-px h-7 bg-slate-200" />
-            {/* Schedule full page button */}
-            <button onClick={() => setActiveView(activeView === 'schedule' ? 'dashboard' : 'schedule')}
-              title="Jadwal  Hari Ini"
-              className={`w-10 h-10 rounded-xl flex items-center justify-center hover:bg-slate-800 transition-all shadow-md ${activeView === 'schedule' ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white'}`}>
-              <LayoutDashboard size={18} />
-            </button>
+            <div className="text-left hidden sm:block">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Status</p>
+              <p className="text-xs font-bold text-emerald-600">Online</p>
+            </div>
           </div>
-          {/* History tab button */}
-          <button onClick={() => { setActiveView(activeView === 'history' ? 'dashboard' : 'history'); if (activeView !== 'history') fetchHistory(); }}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-bold transition-all ${activeView === 'history' ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'}`}>
-            <History size={16} />
-            <span className="hidden sm:inline">Riwayat</span>
-          </button>
-          <button onClick={() => setActiveView(activeView === 'jadwal_pelajaran' ? 'dashboard' : 'jadwal_pelajaran')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-bold transition-all ${activeView === 'jadwal_pelajaran' ? 'bg-emerald-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'}`}>
-            <BookOpenCheck size={16} />
-            <span className="hidden sm:inline">Pelajaran</span>
-          </button>
         </div>
       </header>
 
+      {/* Menu Navigasi - Desktop & Mobile optimized */}
+      <section className="sm:grid grid-cols-4 gap-3 hidden">
+        <button onClick={() => setActiveView(activeView === 'history' ? 'dashboard' : 'history')}
+          className={`flex flex-col items-center justify-center gap-2 p-4 rounded-3xl border transition-all ${activeView === 'history' ? 'bg-slate-900 border-slate-900 text-white shadow-lg' : 'bg-white border-slate-100 text-slate-600 hover:border-slate-200 shadow-sm'}`}>
+          <div className={`p-2 rounded-xl ${activeView === 'history' ? 'bg-white/10' : 'bg-slate-50'}`}><History size={20} /></div>
+          <span className="text-xs font-bold">Riwayat</span>
+        </button>
+        <button onClick={() => setActiveView(activeView === 'jadwal_pelajaran' ? 'dashboard' : 'jadwal_pelajaran')}
+          className={`flex flex-col items-center justify-center gap-2 p-4 rounded-3xl border transition-all ${activeView === 'jadwal_pelajaran' ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg' : 'bg-white border-slate-100 text-slate-600 hover:border-slate-200 shadow-sm'}`}>
+          <div className={`p-2 rounded-xl ${activeView === 'jadwal_pelajaran' ? 'bg-white/10' : 'bg-emerald-50'}`}><BookOpenCheck size={20} /></div>
+          <span className="text-xs font-bold">Pelajaran</span>
+        </button>
+        <button onClick={() => setActiveView(activeView === 'schedule' ? 'dashboard' : 'schedule')}
+          className={`flex flex-col items-center justify-center gap-2 p-4 rounded-3xl border transition-all ${activeView === 'schedule' ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : 'bg-white border-slate-100 text-slate-600 hover:border-slate-200 shadow-sm'}`}>
+          <div className={`p-2 rounded-xl ${activeView === 'schedule' ? 'bg-white/10' : 'bg-blue-50'}`}><Calendar size={20} /></div>
+          <span className="text-xs font-bold">Jadwal Piket</span>
+        </button>
+        <button onClick={() => setShowTips('absen')}
+          className="flex flex-col items-center justify-center gap-2 p-4 bg-white rounded-3xl border border-slate-100 text-slate-600 hover:border-slate-200 shadow-sm transition-all">
+          <div className="p-2 bg-amber-50 text-amber-600 rounded-xl"><Info size={20} /></div>
+          <span className="text-xs font-bold">Tips & Bantuan</span>
+        </button>
+      </section>
 
-      {/* Alerts */}
+      {/* Mobile-only Navigation - Two-row grid with larger touch targets */}
+      <section className="grid grid-cols-2 gap-2.5 sm:hidden">
+        <button onClick={() => setActiveView(activeView === 'history' ? 'dashboard' : 'history')}
+          className={`flex items-center gap-3 p-3.5 rounded-2xl border transition-all ${activeView === 'history' ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-100 text-slate-700'}`}>
+          <div className={`p-1.5 rounded-lg ${activeView === 'history' ? 'bg-white/10' : 'bg-slate-50 text-slate-400'}`}><History size={18} /></div>
+          <span className="text-[11px] font-bold">Riwayat</span>
+        </button>
+        <button onClick={() => setActiveView(activeView === 'jadwal_pelajaran' ? 'dashboard' : 'jadwal_pelajaran')}
+          className={`flex items-center gap-3 p-3.5 rounded-2xl border transition-all ${activeView === 'jadwal_pelajaran' ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-slate-100 text-slate-700'}`}>
+          <div className={`p-1.5 rounded-lg ${activeView === 'jadwal_pelajaran' ? 'bg-white/10' : 'bg-emerald-50 text-emerald-400'}`}><BookOpenCheck size={18} /></div>
+          <span className="text-[11px] font-bold">Pelajaran</span>
+        </button>
+        <button onClick={() => setActiveView(activeView === 'schedule' ? 'dashboard' : 'schedule')}
+          className={`flex items-center gap-3 p-3.5 rounded-2xl border transition-all ${activeView === 'schedule' ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-100 text-slate-700'}`}>
+          <div className={`p-1.5 rounded-lg ${activeView === 'schedule' ? 'bg-white/10' : 'bg-blue-50 text-blue-400'}`}><Calendar size={18} /></div>
+          <span className="text-[11px] font-bold">Jadwal Piket</span>
+        </button>
+        <button onClick={() => setShowTips('absen')}
+          className="flex items-center gap-3 p-3.5 bg-white rounded-2xl border border-slate-100 text-slate-700">
+          <div className="p-1.5 bg-amber-50 text-amber-500 rounded-lg"><Info size={18} /></div>
+          <span className="text-[11px] font-bold">Bantuan</span>
+        </button>
+      </section>
+
+
+      {/* Alerts & Emergency Mode Status */}
       <div className="space-y-3">
-        {!isAssignedToday && (
+        {isEmergencyActive && (() => {
+          // Determine source & remaining time
+          const serverExpiry = parseInt(settings.bypass_expires_at || '0');
+          const localExpiry = emergencyModeUntil;
+          const isServerBypass = settings.bypass_time === 'true' && (serverExpiry === 0 || Date.now() <= serverExpiry);
+          const expiryMs = isServerBypass ? serverExpiry : (localExpiry || 0);
+          const remaining = expiryMs > 0 ? Math.max(0, expiryMs - Date.now()) : null;
+          const remMin = remaining !== null ? Math.floor(remaining / 60000) : null;
+          const remSec = remaining !== null ? Math.floor((remaining % 60000) / 1000) : null;
+          return (
+            <div className="p-4 bg-purple-600 text-white rounded-3xl shadow-lg shadow-purple-200 flex items-center justify-between border-2 border-purple-400">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center"><Zap size={18} className="animate-pulse" /></div>
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest leading-none mb-1">Mode Tanpa Batasan Aktif</p>
+                  <p className="text-[10px] font-bold opacity-80">
+                    {isServerBypass ? 'Diaktifkan admin — Bebas kirim absen & laporan dari mana saja.' : 'Bebas kirim absen & laporan dari mana saja.'}
+                  </p>
+                </div>
+              </div>
+              {remMin !== null && (
+                <div className="text-right">
+                  <p className="text-lg font-mono font-black italic">
+                    {remMin}:{String(remSec!).padStart(2, '0')}
+                  </p>
+                  <p className="text-[8px] font-black uppercase tracking-widest leading-none">menit</p>
+                </div>
+              )}
+              {remMin === null && (
+                <div className="text-right">
+                  <p className="text-xs font-black opacity-70">Tanpa batas waktu</p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {!isAssignedToday && !isEmergencyActive && (
           <div className="p-5 bg-amber-50 border border-amber-200 rounded-4xl flex items-center gap-4 text-amber-800">
             <div className="w-10 h-10 bg-amber-100 rounded-2xl flex items-center justify-center shrink-0"><AlertTriangle size={20} /></div>
-            <div>
+            <div className="flex-1">
               <p className="font-bold">Bukan Jadwal Anda</p>
-              <p className="text-sm font-medium opacity-80">Hari ini Anda tidak memiliki jadwal. Jika Anda berhalangan pada hari jadwal Anda, gunakan fitur <strong>Substitusi</strong> di bawah.</p>
+              <p className="text-sm font-medium opacity-80">Menu absen & laporan ditutup karena bukan jadwal Anda hari ini.</p>
             </div>
+            <button onClick={activateEmergencyMode} className="p-3 bg-white text-purple-600 rounded-2xl border border-purple-100 shadow-sm hover:bg-purple-50 transition-all font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 shrink-0">
+              <Zap size={14} /> Buka Batasan
+            </button>
           </div>
         )}
         {isPastTimeLimit && !status && (
           <div className="p-5 bg-red-50 border border-red-200 rounded-4xl flex items-center gap-4 text-red-800">
             <div className="w-10 h-10 bg-red-100 rounded-2xl flex items-center justify-center shrink-0"><Clock size={20} /></div>
             <div><p className="font-bold">Batas Waktu Terlewati</p><p className="text-sm font-medium opacity-80">Batas absen ({settings.report_time_limit} WIB) telah berakhir.</p></div>
-          </div>
-        )}
-        {settings.testing_mode === 'true' && (
-          <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl flex items-center gap-3 text-blue-700">
-            <Info size={16} /><p className="text-xs font-bold uppercase tracking-widest">Mode Testing Aktif: Batasan waktu & lokasi diabaikan.</p>
           </div>
         )}
       </div>
@@ -1824,9 +1788,20 @@ const PJDashboard = ({ user }: { user: User }) => {
                           </div>
                         </div>
                         {report.cleaning_photo && canEditReport(report) && (
-                          <button onClick={() => { setEditingReport(report); setEditPhoto(null); }}
+                          <button onClick={() => {
+                            setEditingReport(report);
+                            setEditPhoto(null);
+                            // Pre-populate absents from the report
+                            const preAbsents: { member: ClassMember; reason: MemberStatus }[] = (report.absents || [])
+                              .filter((a: any) => allMembers.find(m => m.id === a.member_id))
+                              .map((a: any) => {
+                                const member = allMembers.find(m => m.id === a.member_id)!;
+                                return { member, reason: (a.reason as MemberStatus) || MEMBER_STATUSES.ALFA };
+                              });
+                            setEditAbsents(preAbsents);
+                          }}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold border border-blue-100 hover:bg-blue-100 transition-all">
-                            <Edit2 size={12} />Edit Foto
+                            <Edit2 size={12} />Edit
                           </button>
                         )}
                       </div>
@@ -1854,9 +1829,9 @@ const PJDashboard = ({ user }: { user: User }) => {
                       )}
                       {report.absents && report.absents.length > 0 && (
                         <div>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Tidak Hadir:</p>
-                          <div className="flex flex-wrap gap-2">
-                            {report.absents.map((a, i) => <span key={i} className="px-3 py-1 bg-red-50 text-red-600 text-xs font-bold rounded-full border border-red-100">{a.name}</span>)}
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Alfa:</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {report.absents.map((a, i) => <span key={i} className="px-2.5 py-1 bg-red-50 text-red-600 text-xs font-bold rounded-full border border-red-100 whitespace-nowrap">{a.name}</span>)}
                           </div>
                         </div>
                       )}
@@ -1865,45 +1840,93 @@ const PJDashboard = ({ user }: { user: User }) => {
                 </div>
               )}
             </div>
-            {/* Edit photo modal - supports both photo types */}
+            {/* Edit modal - supports photo + absent members */}
             {editingReport && (
-              <div className="fixed inset-0 z-100 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-                  className="bg-white rounded-[2.5rem] w-full max-w-md p-8 shadow-2xl">
-                  <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-xl font-bold text-slate-900">Edit Foto Laporan</h3>
-                    <button onClick={() => { setEditingReport(null); setEditPhoto(null); }} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all"><X size={20} /></button>
-                  </div>
-                  <div className="space-y-5">
-                    {/* Photo type selector */}
-                    <div>
-                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Jenis Foto</p>
+              <div className="fixed inset-0 z-100 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm p-0 sm:p-4">
+                <motion.div initial={{ opacity: 0, y: 60 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ type: 'spring', damping: 24, stiffness: 280 }}
+                  className="bg-white w-full sm:max-w-lg rounded-t-4xl sm:rounded-4xl shadow-2xl overflow-hidden"
+                  style={{ maxHeight: '92dvh' }}>
+                  <div className="flex justify-center pt-3 sm:hidden"><div className="w-9 h-1 bg-slate-200 rounded-full" /></div>
+                  <div className="px-5 py-5 sm:px-6 sm:py-6 space-y-5 overflow-y-auto" style={{ maxHeight: 'calc(92dvh - 2rem)', scrollbarWidth: 'none' }}>
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-xl font-bold text-slate-900">Edit Laporan</h3>
+                      <button onClick={() => { setEditingReport(null); setEditPhoto(null); setEditAbsents([]); }} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all"><X size={20} /></button>
+                    </div>
+
+                    {/* --- Section: Foto --- */}
+                    <div className="p-4 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
+                      <p className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Camera size={12} />Ganti Foto (Opsional)</p>
                       <div className="flex gap-3">
                         <button type="button" onClick={() => setEditPhotoType('cleaning')}
-                          className={`flex-1 py-3 rounded-2xl text-sm font-bold transition-all border-2 ${editPhotoType === 'cleaning' ? 'bg-amber-50 border-amber-400 text-amber-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                          className={`flex-1 py-2.5 rounded-2xl text-sm font-bold transition-all border-2 ${editPhotoType === 'cleaning' ? 'bg-amber-50 border-amber-400 text-amber-700' : 'bg-white border-slate-200 text-slate-500'}`}>
                           Foto Kebersihan
                         </button>
                         <button type="button" onClick={() => setEditPhotoType('checkin')}
-                          className={`flex-1 py-3 rounded-2xl text-sm font-bold transition-all border-2 ${editPhotoType === 'checkin' ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                          className={`flex-1 py-2.5 rounded-2xl text-sm font-bold transition-all border-2 ${editPhotoType === 'checkin' ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-slate-200 text-slate-500'}`}>
                           Foto Kehadiran
                         </button>
                       </div>
+                      <label className="flex flex-col items-center p-5 bg-white rounded-2xl border-2 border-dashed border-slate-200 cursor-pointer hover:border-emerald-400 transition-all">
+                        <Camera size={24} className="text-slate-400 mb-2" />
+                        <span className="text-sm font-bold text-slate-600">{editPhoto ? editPhoto.name : 'Pilih foto baru (kosongkan jika tidak diganti)'}</span>
+                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => setEditPhoto(e.target.files?.[0] || null)} />
+                      </label>
+                      {editPhoto && (
+                        <div className="rounded-2xl overflow-hidden aspect-video">
+                          <img src={URL.createObjectURL(editPhoto)} alt="Preview" className="w-full h-full object-cover" />
+                        </div>
+                      )}
                     </div>
-                    <label className="flex flex-col items-center p-6 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 cursor-pointer hover:border-blue-400 transition-all">
-                      <Camera size={28} className="text-slate-400 mb-2" />
-                      <span className="text-sm font-bold text-slate-600">{editPhoto ? editPhoto.name : 'Pilih foto baru'}</span>
-                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => setEditPhoto(e.target.files?.[0] || null)} />
-                    </label>
-                    {editPhoto && (
-                      <div className="rounded-2xl overflow-hidden aspect-video">
-                        <img src={URL.createObjectURL(editPhoto)} alt="Preview" className="w-full h-full object-cover" />
+
+                    {/* --- Section: Anggota Tidak Masuk --- */}
+                    <div className="p-4 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
+                      <p className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><UserX size={12} />Anggota Tidak Masuk</p>
+                      <div className="relative">
+                        <div className="flex items-center gap-3 px-4 py-3 bg-white rounded-2xl border border-slate-200 focus-within:ring-4 focus-within:ring-emerald-500/10 focus-within:border-emerald-500 transition-all">
+                          <Search size={16} className="text-slate-400" />
+                          <input type="text" placeholder="Cari nama anggota..." className="flex-1 bg-transparent outline-none text-sm font-medium"
+                            value={editAbsentSearch}
+                            onChange={(e) => { setEditAbsentSearch(e.target.value); setEditAbsentShowSugg(true); }}
+                            onFocus={() => setEditAbsentShowSugg(true)} />
+                        </div>
+                        <AnimatePresence>
+                          {editAbsentShowSugg && editAbsentSearch.length > 0 && (
+                            <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
+                              className="absolute top-full left-0 right-0 mt-1 bg-white rounded-2xl shadow-2xl border border-slate-100 z-30 max-h-44 overflow-y-auto py-2">
+                              {allMembers.filter(m => !m.is_pj_group && m.name.toLowerCase().includes(editAbsentSearch.toLowerCase()) && !editAbsents.find(a => a.member.id === m.id))
+                                .map(m => (
+                                  <button key={m.id} onClick={() => { setEditAbsents(prev => [...prev, { member: m, reason: MEMBER_STATUSES.ALFA }]); setEditAbsentSearch(''); setEditAbsentShowSugg(false); }}
+                                    className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">{m.name}</button>
+                                ))}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
-                    )}
+                      <div className="space-y-2">
+                        {editAbsents.map(({ member, reason }) => (
+                          <div key={member.id} className="flex flex-col gap-2 p-3 bg-red-50 rounded-2xl border border-red-100">
+                            <div className="flex items-center gap-3">
+                              <div className="w-7 h-7 bg-red-100 rounded-lg flex items-center justify-center text-red-600 font-bold text-xs shrink-0">{member.name.charAt(0)}</div>
+                              <span className="text-sm font-bold text-red-900 flex-1 min-w-0 truncate">{member.name}</span>
+                              <button onClick={() => setEditAbsents(prev => prev.filter(a => a.member.id !== member.id))} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-xl transition-all shrink-0"><X size={14} /></button>
+                            </div>
+                            <CustomDropdown
+                              options={Object.values(MEMBER_STATUSES).filter(s => s !== MEMBER_STATUSES.HADIR).map(s => ({ id: s, label: s }))}
+                              value={reason}
+                              onChange={val => setEditAbsents(prev => prev.map(a => a.member.id === member.id ? { ...a, reason: val as MemberStatus } : a))}
+                            />
+                          </div>
+                        ))}
+                        {editAbsents.length === 0 && <p className="text-[10px] text-slate-400 italic font-bold uppercase tracking-widest">Tidak ada — semua anggota hadir</p>}
+                      </div>
+                    </div>
+
                     <div className="flex gap-3">
-                      <button onClick={() => { setEditingReport(null); setEditPhoto(null); }} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-2xl">Batal</button>
-                      <button onClick={handleEditPhoto} disabled={!editPhoto || editSubmitting}
-                        className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all disabled:opacity-50">
-                        {editSubmitting ? 'Menyimpan...' : 'Simpan Foto'}
+                      <button onClick={() => { setEditingReport(null); setEditPhoto(null); setEditAbsents([]); }} className="flex-1 py-3.5 bg-slate-100 text-slate-600 font-bold rounded-2xl hover:bg-slate-200 transition-all">Batal</button>
+                      <button onClick={handleEditPhoto} disabled={editSubmitting}
+                        className="flex-1 py-3.5 bg-emerald-600 text-white font-bold rounded-2xl hover:bg-emerald-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                        {editSubmitting ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Menyimpan...</> : <><CheckCircle size={16} />Simpan Perubahan</>}
                       </button>
                     </div>
                   </div>
@@ -1977,18 +2000,15 @@ const PJDashboard = ({ user }: { user: User }) => {
                           <div className={`w-2 h-2 rounded-full ${distance !== null && distance <= MAX_DISTANCE_METERS ? 'bg-emerald-500' : 'bg-red-500'} animate-pulse`} />
                           <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Lokasi</span>
                         </div>
-                        <span className={`text-sm font-bold ${distance !== null && distance <= MAX_DISTANCE_METERS ? 'text-emerald-600' : 'text-red-600'}`}>
-                          {distance !== null ? `${Math.round(distance)}m` : 'Mencari...'}
+                        <span className={`text-sm font-bold ${isEmergencyActive || (distance !== null && distance <= MAX_DISTANCE_METERS) ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {isEmergencyActive ? 'BYPASSED' : distance !== null ? `${Math.round(distance)}m` : 'Mencari...'}
                         </span>
                       </div>
-                      <button onClick={handleAttendance} disabled={!photo || submitting || isPastTimeLimit || !isAssignedToday}
+                      <button onClick={handleAttendance} disabled={!photo || submitting || (isPastTimeLimit && !isEmergencyActive) || (!isAssignedToday && !isEmergencyActive)}
                         className="btn-primary w-full py-4 flex items-center justify-center gap-3">
                         {submitting ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> :
-                          !isAssignedToday ? '⚠ Gunakan Substitusi Jika Berhalangan' : isPastTimeLimit ? 'Absensi Ditutup' : 'Konfirmasi Kehadiran'}
+                          (!isAssignedToday && !isEmergencyActive) ? 'Absensi Terkunci' : (isPastTimeLimit && !isEmergencyActive) ? 'Absensi Ditutup' : 'Konfirmasi Kehadiran'}
                       </button>
-                      {!isAssignedToday && (
-                        <p className="text-[10px] text-amber-600 font-bold text-center">Status kehadiran PJ terkunci. Wajib gunakan fitur substitusi di bawah jika berhalangan hadir pada jadwal Anda.</p>
-                      )}
                     </div>
                   )}
                 </section>
@@ -2018,6 +2038,10 @@ const PJDashboard = ({ user }: { user: User }) => {
                         <div className="w-14 h-14 bg-emerald-600 text-white rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-100"><CheckCircle2 size={28} /></div>
                         <h4 className="text-lg font-bold text-emerald-900">Laporan Berhasil Terkirim</h4>
                         <p className="text-emerald-700 font-medium mt-2 text-sm">Terima kasih atas dedikasi Anda hari ini!</p>
+                        {/* Read status info */}
+                        <div className={`mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border ${status?.is_read ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                          {status?.is_read ? <><Eye size={12} />Laporan sudah dibaca admin</> : <><EyeOff size={12} />Menunggu admin membaca</>}
+                        </div>
                       </div>
                       {status.cleaning_photo && (
                         <div className="rounded-2xl overflow-hidden cursor-pointer relative group aspect-video" onClick={() => setPreviewImage(status.cleaning_photo)}>
@@ -2091,8 +2115,8 @@ const PJDashboard = ({ user }: { user: User }) => {
                                   {activeSub
                                     ? <p className="text-[10px] font-bold text-amber-600">Digantikan oleh {activeSub.substitute_name} · {activeSub.original_date}</p>
                                     : subForMe
-                                    ? <p className="text-[10px] font-bold text-blue-600">Menggantikan {subForMe.requester_name} · {subForMe.original_date}</p>
-                                    : <p className="text-[10px] font-medium text-emerald-600">Hadir · Bertugas hari ini</p>}
+                                      ? <p className="text-[10px] font-bold text-blue-600">Menggantikan {subForMe.requester_name} · {subForMe.original_date}</p>
+                                      : <p className="text-[10px] font-medium text-emerald-600">Hadir · Bertugas hari ini</p>}
                                 </div>
                               </div>
                               <div className="shrink-0">
@@ -2187,36 +2211,51 @@ const PJDashboard = ({ user }: { user: User }) => {
                             <AnimatePresence>
                               {showSuggestions && searchTerm.length > 0 && (
                                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
-                                  className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 z-30 max-h-52 overflow-y-auto py-2">
+                                  className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 z-30 max-h-32 overflow-y-auto py-2">
                                   {allMembers.filter(m => m.name.toLowerCase().includes(searchTerm.toLowerCase()))
-                                    .filter(m => !selectedAbsentSchool.find(s => s.id === m.id))
+                                    .filter(m => !selectedAbsentSchool.find(item => item.member.id === m.id))
                                     .filter(m => !pjMembers.find(p => p.id === m.id))
                                     .filter(m => !m.is_pj_group)
                                     .map(m => (
-                                      <button key={m.id} onClick={() => { setSelectedAbsentSchool([...selectedAbsentSchool, m]); setSearchTerm(''); setShowSuggestions(false); }}
+                                      <button key={m.id} onClick={() => { setSelectedAbsentSchool([...selectedAbsentSchool, { member: m, reason: MEMBER_STATUSES.ALFA }]); setSearchTerm(''); setShowSuggestions(false); }}
                                         className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">{m.name}</button>
                                     ))}
                                 </motion.div>
                               )}
                             </AnimatePresence>
                           </div>
-                          <div className="flex flex-wrap gap-2">
-                            {selectedAbsentSchool.map(m => (
-                              <div key={m.id} className="flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-700 rounded-xl border border-red-100">
-                                <span className="text-xs font-bold">{m.name}</span>
-                                <button onClick={() => removeSelectedAbsent(m.id)} className="p-0.5 hover:bg-red-100 rounded-full"><X size={12} /></button>
+                          <div className="space-y-2">
+                            {selectedAbsentSchool.map(({ member, reason }) => (
+                              <div key={member.id} className="flex flex-col gap-2 p-3 bg-red-50 rounded-2xl border border-red-100">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-7 h-7 bg-red-100 rounded-lg flex items-center justify-center text-red-600 font-bold text-xs shrink-0">{member.name.charAt(0)}</div>
+                                  <span className="text-sm font-bold text-red-900 flex-1 min-w-0 truncate">{member.name}</span>
+                                  <button onClick={() => removeSelectedAbsent(member.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-xl transition-all shrink-0"><X size={14} /></button>
+                                </div>
+                                <CustomDropdown
+                                  options={Object.values(MEMBER_STATUSES).filter(s => s !== MEMBER_STATUSES.HADIR).map(s => ({ id: s, label: s }))}
+                                  value={reason}
+                                  onChange={val => setSelectedAbsentSchool(prev => prev.map(item => item.member.id === member.id ? { ...item, reason: val as MemberStatus } : item))}
+                                />
                               </div>
                             ))}
-                            {selectedAbsentSchool.length === 0 && <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest italic">Belum ada anggota ditambahkan</p>}
+                            {selectedAbsentSchool.length === 0 && <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest italic py-1">Belum ada anggota ditambahkan</p>}
                           </div>
                         </div>
                       </div>
 
-                      <button onClick={handleReport} disabled={!cleaningPhoto || !status || submitting || !isAssignedToday || isPastCleaningLimit}
+                      <button onClick={handleReport} disabled={!cleaningPhoto || !status || submitting || (isPastCleaningLimit && !isEmergencyActive) || (!isAssignedToday && !isEmergencyActive)}
                         className="btn-primary w-full py-4 flex items-center justify-center gap-3 text-base">
-                        {submitting ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : isPastCleaningLimit ? 'Laporan Ditutup' : <><CheckCircle2 size={20} />Kirim Laporan</>}
+                        {submitting ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> :
+                          (!isAssignedToday && !isEmergencyActive) ? 'Laporan Terkunci' : (isPastCleaningLimit && !isEmergencyActive) ? 'Laporan Ditutup' : <><CheckCircle2 size={20} />Kirim Laporan</>}
                       </button>
-                      {!status && !isPastTimeLimit && isAssignedToday && <p className="text-center text-xs text-red-500 font-bold">⚠️ Harap absen kehadiran terlebih dahulu!</p>}
+                      {!status && !isPastTimeLimit && (isAssignedToday || isEmergencyActive) && <p className="text-center text-xs text-red-500 font-bold">⚠️ Harap absen kehadiran terlebih dahulu!</p>}
+                      {!isAssignedToday && !isEmergencyActive && (
+                        <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-center">
+                          <p className="text-xs font-bold text-amber-700">Laporan ditutup karena bukan jadwal piket Anda.</p>
+                          <button onClick={activateEmergencyMode} className="mt-2 text-[10px] font-black uppercase tracking-widest text-purple-600 bg-white px-3 py-1.5 rounded-lg border border-purple-100">Aktifkan Mode Tanpa Batasan</button>
+                        </div>
+                      )}
                       {isPastCleaningLimit && <p className="text-center text-xs text-red-500 font-bold">⏰ Batas waktu laporan kebersihan ({settings.cleaning_time_limit || '08:00'} WIB) telah terlewati.</p>}
                     </div>
                   )}
@@ -2231,85 +2270,11 @@ const PJDashboard = ({ user }: { user: User }) => {
   );
 };
 
-// --- PENDING APPROVALS SECTION ---
-const PendingApprovalsSection = () => {
-  const [pending, setPending] = React.useState<any[]>([]);
-  const [loading, setLoading] = React.useState(true);
-
-  const load = async () => {
-    setLoading(true);
-    try { setPending(await safeFetch('/api/pending-approvals')); } catch { }
-    setLoading(false);
-  };
-
-  React.useEffect(() => { load(); }, []);
-
-  const approve = async (id: number) => {
-    try {
-      await safeFetch(`/api/pending-approvals/${id}/approve`, { method: 'POST' });
-      toast.success('Data berhasil disetujui dan disimpan!');
-      load();
-    } catch (err: any) { toast.error(err.message); }
-  };
-
-  const reject = async (id: number) => {
-    try {
-      await safeFetch(`/api/pending-approvals/${id}/reject`, { method: 'POST' });
-      toast.info('Pengajuan ditolak.');
-      load();
-    } catch (err: any) { toast.error(err.message); }
-  };
-
-  if (loading) return null;
-  if (pending.length === 0) return (
-    <div className="mt-6 p-4 bg-emerald-50 rounded-2xl border border-emerald-100 text-center">
-      <p className="text-sm font-bold text-emerald-700">✓ Tidak ada data menunggu konfirmasi</p>
-    </div>
-  );
-
-  return (
-    <div className="mt-6 space-y-3">
-      <div className="flex items-center gap-2 mb-2">
-        <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
-        <p className="text-sm font-black text-amber-700 uppercase tracking-widest">Menunggu Konfirmasi Admin ({pending.length})</p>
-      </div>
-      {pending.map((item: any) => {
-        const data = JSON.parse(item.data || '{}');
-        return (
-          <div key={item.id} className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className={`px-2 py-0.5 text-[10px] font-black rounded-full uppercase tracking-widest ${item.type === 'attendance' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                    {item.type === 'attendance' ? 'Absensi' : 'Laporan'}
-                  </span>
-                  <span className="text-xs font-bold text-amber-800">{item.pj_name}</span>
-                </div>
-                <p className="text-[10px] text-amber-600 font-medium mt-1">
-                  {item.type === 'attendance' ? `Pukul ${data.checkin_time} WIB · Status: ${data.status}` : `Tanggal: ${data.date}`}
-                </p>
-                <p className="text-[9px] text-amber-500 mt-0.5">{new Date(item.created_at).toLocaleString('id-ID')}</p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => reject(item.id)}
-                className="flex-1 py-2 bg-white text-red-600 border border-red-200 text-xs font-bold rounded-xl hover:bg-red-50 transition-all">
-                ✗ Tolak
-              </button>
-              <button onClick={() => approve(item.id)}
-                className="flex-1 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl hover:bg-emerald-700 transition-all">
-                ✓ Setujui
-              </button>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-};
+// --- PENDING APPROVALS SECTION (disabled - admin confirmation removed) ---
+const PendingApprovalsSection = () => null;
 
 // --- ADMIN DASHBOARD ---
-const AdminDashboard = ({ user }: { user: User }) => {
+const AdminDashboard = ({ user, onLoginAs }: { user: User; onLoginAs: (u: User) => void }) => {
   const [reports, setReports] = useState<any[]>([]);
   const [members, setMembers] = useState<ClassMember[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -2323,6 +2288,7 @@ const AdminDashboard = ({ user }: { user: User }) => {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [adminTick, setAdminTick] = useState(0);
 
   // Folders state
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
@@ -2345,6 +2311,12 @@ const AdminDashboard = ({ user }: { user: User }) => {
   const [showCopyPaste, setShowCopyPaste] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
+
+  // Tick for countdown in settings
+  useEffect(() => {
+    const interval = setInterval(() => setAdminTick(t => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const fetchData = async () => {
     setLoading(true);
@@ -2397,7 +2369,7 @@ const AdminDashboard = ({ user }: { user: User }) => {
     setIsConfirmOpen(true);
   };
 
-  const handleAddMember = async (e: React.FormEvent) => {
+  const handleAddMember = async (e: FormEvent) => {
     e.preventDefault();
     try {
       // Auto-detect PJ: if member name exists in users, link them automatically
@@ -2410,7 +2382,7 @@ const AdminDashboard = ({ user }: { user: User }) => {
     } catch (err: any) { toast.error(err.message || 'Gagal menyimpan anggota'); }
   };
 
-  const handleAddUser = async (e: React.FormEvent) => {
+  const handleAddUser = async (e: FormEvent) => {
     e.preventDefault();
     try {
       if (editingUser) {
@@ -2424,7 +2396,7 @@ const AdminDashboard = ({ user }: { user: User }) => {
     } catch (err: any) { toast.error(err.message || 'Gagal menyimpan PJ'); }
   };
 
-  const handleAddSchedule = async (e: React.FormEvent) => {
+  const handleAddSchedule = async (e: FormEvent) => {
     e.preventDefault();
     try {
       if (editingSchedule) {
@@ -2449,12 +2421,7 @@ const AdminDashboard = ({ user }: { user: User }) => {
   const updateSetting = async (key: string, value: any) => {
     try {
       await safeFetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }) });
-      if (key === 'testing_mode') {
-        // Reload to ensure clean state when testing mode changes
-        setTimeout(() => window.location.reload(), 300);
-      } else {
-        fetchData();
-      }
+      fetchData();
     }
     catch { toast.error('Gagal memperbarui pengaturan'); }
   };
@@ -2515,15 +2482,19 @@ const AdminDashboard = ({ user }: { user: User }) => {
     </div>
   );
 
-  const tabs = [
-    { id: 'reports', label: 'Laporan', icon: ClipboardList },
+  // Tab groups: piket tabs and general tabs
+  const piketTabs = [
+    { id: 'users', label: 'Akun PJ', icon: ShieldCheck },
+    { id: 'schedules', label: 'Jadwal Piket', icon: Calendar },
+    { id: 'reports', label: 'Laporan Piket', icon: ClipboardList },
+  ];
+  const generalTabs = [
     { id: 'members', label: 'Anggota', icon: Users },
-    { id: 'users', label: 'PJ ', icon: ShieldCheck },
-    { id: 'schedules', label: 'Jadwal', icon: Calendar },
     { id: 'jadwal_pelajaran', label: 'Pelajaran', icon: BookOpenCheck },
-    { id: 'violations', label: 'Pelanggaran', icon: AlertTriangle },
+    { id: 'violations', label: 'Laporan', icon: UserX },
     { id: 'settings', label: 'Pengaturan', icon: Settings }
   ];
+  const tabs = [...piketTabs, ...generalTabs];
 
   return (
     <div className="max-w-6xl mx-auto p-4 space-y-6">
@@ -2618,14 +2589,30 @@ const AdminDashboard = ({ user }: { user: User }) => {
             )}
           </div>
           {/* Tab navigation */}
-          <div className="flex bg-slate-100 p-1.5 rounded-2xl overflow-x-auto scrollbar-hide gap-0.5 shrink-0">
-            {tabs.map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${activeTab === tab.id ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                <tab.icon size={16} />
-                <span className="hidden sm:inline">{tab.label}</span>
-              </button>
-            ))}
+          <div className="flex flex-col gap-1.5 shrink-0">
+            {/* Piket group */}
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-1.5 hidden sm:block">Piket</span>
+              <div className="flex bg-blue-50 p-1 rounded-2xl overflow-x-auto scrollbar-hide gap-0.5 border border-blue-100">
+                {piketTabs.map(tab => (
+                  <button key={tab.id} onClick={() => setActiveTab(tab.id as any)}
+                    className={`flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-sm' : 'text-blue-600 hover:bg-blue-100'}`}>
+                    <tab.icon size={15} />
+                    <span className="hidden sm:inline">{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* General group */}
+            <div className="flex bg-slate-100 p-1 rounded-2xl overflow-x-auto scrollbar-hide gap-0.5">
+              {generalTabs.map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id as any)}
+                  className={`flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${activeTab === tab.id ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                  <tab.icon size={15} />
+                  <span className="hidden sm:inline">{tab.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
         </div>
@@ -2637,7 +2624,7 @@ const AdminDashboard = ({ user }: { user: User }) => {
         {activeTab === 'reports' && (
           <div className="p-6 sm:p-8">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-              <h3 className="text-xl font-bold text-slate-900">Riwayat Laporan</h3>
+              <h3 className="text-xl font-bold text-slate-900">Riwayat Laporan Piket</h3>
               <div className="flex items-center gap-3">
                 <button onClick={() => handleReset('reports')} className="px-4 py-2 bg-red-50 text-red-600 text-xs font-bold rounded-xl border border-red-100 hover:bg-red-600 hover:text-white transition-all">Reset Laporan</button>
                 <button onClick={fetchData} className="p-2 hover:bg-slate-50 rounded-xl text-slate-400"><RefreshCw size={20} /></button>
@@ -2823,7 +2810,15 @@ const AdminDashboard = ({ user }: { user: User }) => {
                         <p className="text-xs font-bold text-blue-600 uppercase tracking-widest">penanggung jawab</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                    <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all">
+                      <button onClick={() => {
+                        onLoginAs(pj);
+                        toast.success(`Login sebagai ${pj.name}`);
+                      }}
+                        title="Login sebagai PJ ini"
+                        className="flex items-center gap-1.5 px-3 py-2 bg-blue-50 text-blue-600 text-xs font-bold rounded-xl hover:bg-blue-600 hover:text-white transition-all border border-blue-100">
+                        <LogIn size={14} />Masuk sebagai PJ
+                      </button>
                       <button onClick={() => confirmDelete('user', pj.id, pj.name)}
                         className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"><Trash2 size={16} /></button>
                     </div>
@@ -2986,7 +2981,7 @@ const AdminDashboard = ({ user }: { user: User }) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <input type="time" className="input-field max-w-[150px]" value={settings.cleaning_time_limit || '17:25'} onChange={(e) => updateSetting('cleaning_time_limit', e.target.value)} />
+                  <input type="time" className="input-field max-w-[150px]" value={settings.cleaning_time_limit || '17:00'} onChange={(e) => updateSetting('cleaning_time_limit', e.target.value)} />
                   <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">WIB</span>
                 </div>
               </div>
@@ -2995,8 +2990,8 @@ const AdminDashboard = ({ user }: { user: User }) => {
                 <div className="flex items-center gap-3 mb-2">
                   <div className="w-10 h-10 bg-purple-100 text-purple-600 rounded-xl flex items-center justify-center"><Edit2 size={20} /></div>
                   <div>
-                    <h4 className="font-bold text-slate-900">Batas Edit Foto Laporan</h4>
-                    <p className="text-xs text-slate-500 font-medium">PJ dapat edit foto laporan dalam waktu ini.</p>
+                    <h4 className="font-bold text-slate-900">Batas Edit Laporan</h4>
+                    <p className="text-xs text-slate-500 font-medium">PJ dapat edit foto & anggota tidak masuk dalam waktu ini.</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -3004,47 +2999,83 @@ const AdminDashboard = ({ user }: { user: User }) => {
                   <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">Menit</span>
                 </div>
               </div>
-              {/* Test Mode */}
-              <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
-                <div className="flex items-center justify-between">
+              {/* Mode Tanpa Batasan */}
+              <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4 md:col-span-2">
+                <div className="flex items-center justify-between flex-wrap gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center"><FlaskConical size={20} /></div>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${settings.bypass_time === 'true' ? 'bg-purple-100 text-purple-600' : 'bg-amber-100 text-amber-600'}`}><Zap size={20} /></div>
                     <div>
-                      <h4 className="font-bold text-slate-900">Test Mode</h4>
-                      <p className="text-xs text-slate-500 font-medium">Abaikan batas waktu & lokasi untuk testing.</p>
+                      <h4 className="font-bold text-slate-900">Mode Tanpa Batasan</h4>
+                      <p className="text-xs text-slate-500 font-medium">PJ dapat absen & lapor tanpa batasan waktu, lokasi, dan jadwal. Auto-nonaktif setelah durasi habis.</p>
                     </div>
                   </div>
-                  <button onClick={() => updateSetting('testing_mode', settings.testing_mode === 'true' ? 'false' : 'true')}
-                    className={`w-14 h-8 rounded-full transition-all relative shrink-0 ${settings.testing_mode === 'true' ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                    <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all shadow-sm ${settings.testing_mode === 'true' ? 'right-1' : 'left-1'}`} />
+                  <button onClick={() => {
+                    const isActive = settings.bypass_time === 'true';
+                    if (!isActive) {
+                      // Activate: set expiry timestamp
+                      const durationMin = parseInt(settings.bypass_duration_minutes || '15');
+                      const expiresAt = Date.now() + durationMin * 60 * 1000;
+                      updateSetting('bypass_time', 'true');
+                      updateSetting('bypass_expires_at', expiresAt.toString());
+                    } else {
+                      // Deactivate immediately
+                      updateSetting('bypass_time', 'false');
+                      updateSetting('bypass_expires_at', '0');
+                    }
+                  }}
+                    className={`w-14 h-8 rounded-full transition-all relative shrink-0 ${settings.bypass_time === 'true' ? 'bg-purple-500' : 'bg-slate-300'}`}>
+                    <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all shadow-sm ${settings.bypass_time === 'true' ? 'right-1' : 'left-1'}`} />
                   </button>
                 </div>
-                {settings.testing_mode === 'true' && (
-                  <div className="p-3 bg-amber-50 text-amber-700 text-[10px] font-bold rounded-xl border border-amber-100 flex items-center gap-2">
-                    <Info size={14} />MODE TESTING AKTIF — Batas waktu & lokasi tidak dicek.
+
+                {/* Duration setting */}
+                <div className="flex items-center gap-4 p-4 bg-white rounded-2xl border border-slate-100">
+                  <div className="flex-1">
+                    <p className="text-xs font-bold text-slate-700 mb-1">Durasi Mode Aktif</p>
+                    <p className="text-[10px] text-slate-400 font-medium">Setelah durasi habis, mode akan otomatis dinonaktifkan.</p>
                   </div>
-                )}
-              </div>
-              {/* Admin Confirmation Toggle */}
-              <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-red-100 text-red-600 rounded-xl flex items-center justify-center"><ShieldCheck size={20} /></div>
-                    <div>
-                      <h4 className="font-bold text-slate-900">Konfirmasi Admin</h4>
-                      <p className="text-xs text-slate-500 font-medium">Absen & laporan masuk antrian sebelum dikonfirmasi admin.</p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="number" min="1" max="1440"
+                      className="input-field max-w-[80px] text-center font-bold"
+                      value={settings.bypass_duration_minutes || '15'}
+                      onChange={(e) => updateSetting('bypass_duration_minutes', e.target.value)}
+                    />
+                    <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">Menit</span>
+                  </div>
+                </div>
+
+                {settings.bypass_time === 'true' && (() => {
+                  void adminTick; // Force re-render every second for countdown
+                  const expiresAt = parseInt(settings.bypass_expires_at || '0');
+                  const remaining = expiresAt > 0 ? Math.max(0, expiresAt - Date.now()) : 0;
+                  const remMin = Math.floor(remaining / 60000);
+                  const remSec = Math.floor((remaining % 60000) / 1000);
+                  const isExpired = expiresAt > 0 && Date.now() > expiresAt;
+                  if (isExpired) {
+                    // Auto-deactivate
+                    setTimeout(() => {
+                      updateSetting('bypass_time', 'false');
+                      updateSetting('bypass_expires_at', '0');
+                    }, 500);
+                  }
+                  return (
+                    <div className={`p-3 text-[10px] font-bold rounded-xl border flex items-center justify-between gap-3 ${isExpired ? 'bg-slate-50 text-slate-500 border-slate-200' : 'bg-purple-50 text-purple-700 border-purple-200'}`}>
+                      <div className="flex items-center gap-2">
+                        <Zap size={14} className={isExpired ? '' : 'animate-pulse'} />
+                        {isExpired
+                          ? 'Mode berakhir — menonaktifkan...'
+                          : 'MODE TANPA BATASAN AKTIF — PJ bebas absen & lapor dari mana saja.'
+                        }
+                      </div>
+                      {!isExpired && expiresAt > 0 && (
+                        <span className="font-mono text-sm font-black shrink-0 text-purple-800">
+                          {remMin}:{String(remSec).padStart(2, '0')}
+                        </span>
+                      )}
                     </div>
-                  </div>
-                  <button onClick={() => updateSetting('require_admin_confirm', settings.require_admin_confirm === 'true' ? 'false' : 'true')}
-                    className={`w-14 h-8 rounded-full transition-all relative shrink-0 ${settings.require_admin_confirm === 'true' ? 'bg-red-500' : 'bg-slate-300'}`}>
-                    <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all shadow-sm ${settings.require_admin_confirm === 'true' ? 'right-1' : 'left-1'}`} />
-                  </button>
-                </div>
-                {settings.require_admin_confirm === 'true' && (
-                  <div className="p-3 bg-red-50 text-red-700 text-[10px] font-bold rounded-xl border border-red-100 flex items-center gap-2">
-                    <ShieldCheck size={14} />KONFIRMASI ADMIN AKTIF — Data absen/laporan tidak langsung masuk database utama.
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             </div>
 
@@ -3256,10 +3287,10 @@ const JadwalPelajaranTab = () => {
                     {(r.jam_mulai || r.jam_selesai) && (
                       <span className="text-xs font-bold text-slate-400 shrink-0">{r.jam_mulai}{r.jam_selesai ? `–${r.jam_selesai}` : ''}</span>
                     )}
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                    <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all">
                       <button onClick={() => { setEditingId(r.id); setForm({ hari: r.hari, jam_ke: r.jam_ke, jam_mulai: r.jam_mulai || '', jam_selesai: r.jam_selesai || '', mata_pelajaran: r.mata_pelajaran, guru: r.guru || '' }); setShowForm(true); }}
-                        className="p-1.5 text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"><Edit2 size={14} /></button>
-                      <button onClick={() => handleDelete(r.id)} className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={14} /></button>
+                        className="p-2 sm:p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"><Edit2 size={14} /></button>
+                      <button onClick={() => handleDelete(r.id)} className="p-2 sm:p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={14} /></button>
                     </div>
                   </div>
                 ))}
@@ -3272,51 +3303,181 @@ const JadwalPelajaranTab = () => {
   );
 };
 
-// --- VIOLATIONS TAB ---
+// --- LAPORAN ANGGOTA TAB (replaces Violations) ---
 const ViolationsTab = () => {
   const [summary, setSummary] = useState<any[]>([]);
   const [violations, setViolations] = useState<any[]>([]);
+  const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeView, setActiveView] = useState<'summary' | 'detail'>('summary');
+  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
+  const [activeView, setActiveView] = useState<'anggota' | 'summary' | 'detail'>('anggota');
+
+  const STATUS_COLORS: Record<string, string> = {
+    'Sakit (Dengan Surat)': 'bg-blue-100 text-blue-700 border-blue-200',
+    'Sakit (Tanpa Surat)': 'bg-sky-100 text-sky-700 border-sky-200',
+    'Alfa': 'bg-red-100 text-red-700 border-red-200',
+    'Izin': 'bg-amber-100 text-amber-700 border-amber-200',
+    'Izin Telat': 'bg-amber-100 text-amber-700 border-amber-200',
+    'Dispen': 'bg-teal-100 text-teal-700 border-teal-200',
+    'Tidak Piket': 'bg-red-100 text-red-700 border-red-200',
+    'Telat': 'bg-amber-100 text-amber-700 border-amber-200',
+  };
+
+  const getStatusColor = (type: string) => STATUS_COLORS[type] || 'bg-slate-100 text-slate-700 border-slate-200';
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       try {
-        const [s, v] = await Promise.all([safeFetch('/api/violations/summary'), safeFetch('/api/violations')]);
-        setSummary(s); setViolations(v);
+        const [s, v, m] = await Promise.all([
+          safeFetch('/api/violations/summary'),
+          safeFetch('/api/violations'),
+          safeFetch('/api/members'),
+        ]);
+        setSummary(s); setViolations(v); setMembers(m);
       } catch { }
       setLoading(false);
     };
     load();
   }, []);
 
+  const toggleFolder = (key: string) => {
+    setOpenFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const handleDelete = async (id: number) => {
     try {
       await safeFetch(`/api/violations/${id}`, { method: 'DELETE' });
       setViolations(prev => prev.filter(v => v.id !== id));
-      toast.success('Data pelanggaran dihapus');
+      toast.success('Data laporan dihapus');
     } catch (err: any) { toast.error(err.message); }
   };
 
   if (loading) return <div className="flex items-center justify-center py-20"><div className="w-10 h-10 border-4 border-red-500 border-t-transparent rounded-full animate-spin" /></div>;
 
+  // Group violations by member name
+  const violationsByMember: Record<string, { member: any; violations: any[] }> = {};
+  for (const m of members) {
+    violationsByMember[m.name] = { member: m, violations: [] };
+  }
+  for (const v of violations) {
+    if (!violationsByMember[v.member_name]) {
+      violationsByMember[v.member_name] = { member: { name: v.member_name }, violations: [] };
+    }
+    violationsByMember[v.member_name].violations.push(v);
+  }
+  // Only show members with violations
+  const membersWithViolations = Object.entries(violationsByMember).filter(([, v]) => v.violations.length > 0);
+
   return (
     <div className="p-6 sm:p-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h3 className="text-xl font-bold text-slate-900">Rekapitulasi Pelanggaran</h3>
-          <p className="text-sm text-slate-500 font-medium mt-0.5">Monitoring anggota & keterlambatan</p>
+          <h3 className="text-xl font-bold text-slate-900">Laporan Anggota</h3>
+          <p className="text-sm text-slate-500 font-medium mt-0.5">Rekap ketidakhadiran & laporan per anggota</p>
         </div>
         <div className="flex bg-slate-100 p-1 rounded-2xl gap-1">
-          {[{ id: 'summary', label: 'Ringkasan' }, { id: 'detail', label: 'Detail' }].map(t => (
+          {[
+            { id: 'anggota', label: 'Per Anggota' },
+            { id: 'summary', label: 'Ringkasan' },
+            { id: 'detail', label: 'Detail' }
+          ].map(t => (
             <button key={t.id} onClick={() => setActiveView(t.id as any)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeView === t.id ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${activeView === t.id ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               {t.label}
             </button>
           ))}
         </div>
       </div>
+
+      {/* Per Anggota: folder view grouped by member */}
+      {activeView === 'anggota' && (
+        <div className="space-y-2">
+          {membersWithViolations.length === 0 ? (
+            <div className="py-16 text-center">
+              <CheckCircle2 size={40} className="text-emerald-300 mx-auto mb-3" />
+              <p className="text-slate-400 font-medium">Belum ada laporan anggota tercatat.</p>
+            </div>
+          ) : membersWithViolations.map(([memberName, { violations: memberViolations }]) => {
+            const folderKey = `member-${memberName}`;
+            const isOpen = openFolders.has(folderKey);
+
+            // Group by type
+            const byType: Record<string, any[]> = {};
+            for (const v of memberViolations) {
+              if (!byType[v.type]) byType[v.type] = [];
+              byType[v.type].push(v);
+            }
+
+            return (
+              <div key={memberName} className="mb-2">
+                <button onClick={() => toggleFolder(folderKey)}
+                  className="w-full flex items-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 rounded-2xl border border-slate-100 transition-all group">
+                  {isOpen ? <FolderOpen size={18} className="text-red-400" /> : <Folder size={18} className="text-slate-400 group-hover:text-red-400 transition-colors" />}
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <span className="text-sm font-bold text-slate-800 truncate">{memberName}</span>
+                    <div className="flex gap-1 flex-wrap">
+                      {Object.entries(byType).map(([type, items]) => (
+                        <span key={type} className={`px-1.5 py-0.5 text-[9px] font-black rounded-full border ${getStatusColor(type)}`}>
+                          {type}: {items.length}x
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-slate-400 shrink-0">{memberViolations.length} Catatan</span>
+                  <ChevronDown size={16} className={`text-slate-400 transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
+                </button>
+                <AnimatePresence>
+                  {isOpen && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                      <div className="pl-4 pt-2 pb-3 space-y-1.5">
+                        {/* Sub-folders by type */}
+                        {Object.entries(byType).map(([type, typeViolations]) => {
+                          const typeFolderKey = `${folderKey}-${type}`;
+                          const isTypeOpen = openFolders.has(typeFolderKey);
+                          return (
+                            <div key={type}>
+                              <button onClick={() => toggleFolder(typeFolderKey)}
+                                className="w-full flex items-center gap-2 px-3 py-2.5 bg-white hover:bg-slate-50 rounded-xl border border-slate-100 transition-all group/sub">
+                                {isTypeOpen ? <FolderOpen size={14} className="text-slate-400" /> : <Folder size={14} className="text-slate-300 group-hover/sub:text-slate-400" />}
+                                <span className={`px-2 py-0.5 text-[10px] font-black rounded-full border ${getStatusColor(type)}`}>{type}</span>
+                                <span className="text-xs font-bold text-slate-500 flex-1 text-left">{typeViolations.length}x kejadian</span>
+                                <ChevronDown size={13} className={`text-slate-400 transition-transform ${isTypeOpen ? 'rotate-180' : ''}`} />
+                              </button>
+                              <AnimatePresence>
+                                {isTypeOpen && (
+                                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                                    <div className="pl-4 pt-1.5 space-y-1">
+                                      {typeViolations.map((v: any) => (
+                                        <div key={v.id} className="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-lg border border-slate-100 group/item hover:bg-red-50 hover:border-red-100 transition-all">
+                                          <span className="text-[10px] font-bold text-slate-400 w-20 shrink-0">{v.date}</span>
+                                          {v.notes && <span className="text-xs text-slate-500 italic flex-1 truncate">{v.notes}</span>}
+                                          <button onClick={() => handleDelete(v.id)} className="p-1 text-slate-300 hover:text-red-500 hover:bg-red-100 rounded-lg transition-all opacity-0 group-hover/item:opacity-100 shrink-0">
+                                            <Trash2 size={12} />
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {activeView === 'summary' && (
         <div>
@@ -3335,8 +3496,8 @@ const ViolationsTab = () => {
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-slate-900 text-sm">{s.member_name}</p>
                     <div className="flex gap-3 mt-1 flex-wrap">
-                      {s.tidak_piket > 0 && <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full border border-red-200">Tidak Hadir: {s.tidak_piket}x</span>}
-                      {s.tidak_masuk > 0 && <span className="text-[10px] font-bold text-orange-600 bg-orange-100 px-2 py-0.5 rounded-full border border-orange-200">Tidak Masuk: {s.tidak_masuk}x</span>}
+                      {s.alfa > 0 && <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full border border-red-200">Alfa: {s.alfa}x</span>}
+                      {s.sakit_tanpa_surat > 0 && <span className="text-[10px] font-bold text-sky-600 bg-sky-100 px-2 py-0.5 rounded-full border border-sky-200">Sakit Tanpa Surat: {s.sakit_tanpa_surat}x</span>}
                       {s.telat > 0 && <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">Telat: {s.telat}x</span>}
                     </div>
                   </div>
@@ -3353,11 +3514,11 @@ const ViolationsTab = () => {
           {violations.length === 0 ? (
             <div className="py-16 text-center">
               <CheckCircle2 size={40} className="text-emerald-300 mx-auto mb-3" />
-              <p className="text-slate-400 font-medium">Tidak ada data pelanggaran.</p>
+              <p className="text-slate-400 font-medium">Tidak ada data laporan.</p>
             </div>
           ) : violations.map((v: any) => (
             <div key={v.id} className="flex items-center gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100 group hover:bg-red-50 hover:border-red-100 transition-all">
-              <div className={`px-2.5 py-1 rounded-lg text-[10px] font-black shrink-0 ${v.type === 'Tidak Piket' ? 'bg-red-100 text-red-700' : v.type === 'Tidak Masuk' ? 'bg-orange-100 text-orange-700' : 'bg-amber-100 text-amber-700'}`}>{v.type}</div>
+              <div className={`px-2.5 py-1 rounded-lg text-[10px] font-black shrink-0 border ${getStatusColor(v.type)}`}>{v.type}</div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-slate-900">{v.member_name}</p>
                 <p className="text-[10px] text-slate-400 font-medium">{v.date}</p>
@@ -3408,13 +3569,17 @@ const ReportCard = ({ report, onDelete, onPreview, onReact }: { report: any; key
               </span>
               {report.is_read ? (
                 <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-blue-50 text-blue-600 border border-blue-100 animate-in fade-in zoom-in duration-300">
-                  <Eye size={10} /> Dilihat Admin
+                  <Eye size={10} /> Sudah Dibaca Admin
                 </span>
-              ) : onReact && (
-                <button onClick={onReact} className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-900 text-white hover:bg-slate-800 transition-all active:scale-95">
-                  Tandai Dibaca
+              ) : onReact && report.checkin_photo && report.cleaning_photo ? (
+                <button onClick={onReact} className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-bold rounded-full bg-emerald-600 text-white hover:bg-emerald-700 transition-all active:scale-95 shadow-sm shadow-emerald-200 border border-emerald-500">
+                  <CheckCircle size={11} />Tandai Dibaca
                 </button>
-              )}
+              ) : onReact ? (
+                <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-100 text-slate-400 border border-slate-200">
+                  <Eye size={10} /> Belum Dibaca
+                </span>
+              ) : null}
             </div>
             <h4 className="text-base font-bold text-slate-900 mt-1">Laporan {report.date}</h4>
             <p className="text-xs text-slate-400 font-medium">{report.checkin_time} WIB</p>
@@ -3457,13 +3622,6 @@ const ReportCard = ({ report, onDelete, onPreview, onReact }: { report: any; key
         {report.cleaning_description === 'Semua anggota hadir' && (
           <div className="px-4 py-2 bg-emerald-50 rounded-xl inline-block text-emerald-700 text-xs font-bold">✓ Semua anggota hadir</div>
         )}
-        {report.absents && report.absents.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {report.absents.map((m: any, idx: number) => (
-              <span key={idx} className="px-3 py-1 bg-red-50 text-red-600 text-[10px] font-bold rounded-full border border-red-100">{m.name}</span>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   </div>
@@ -3489,12 +3647,12 @@ const MemberCard = ({ member, users, onEdit, onDelete, onPromote }: { member: Cl
           )}
         </div>
       </div>
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+      <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all">
         {!isPJ && (
-          <button onClick={onPromote} title="Jadikan PJ" className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all"><ShieldCheck size={14} /></button>
+          <button onClick={onPromote} title="Jadikan PJ" className="p-2 sm:p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all"><ShieldCheck size={15} /></button>
         )}
-        <button onClick={onEdit} className="p-1.5 text-slate-300 hover:text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all"><Edit2 size={14} /></button>
-        <button onClick={onDelete} className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={14} /></button>
+        <button onClick={onEdit} className="p-2 sm:p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all"><Edit2 size={15} /></button>
+        <button onClick={onDelete} className="p-2 sm:p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={15} /></button>
       </div>
     </div>
   );
@@ -3507,7 +3665,6 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
   const [adminExists, setAdminExists] = useState<boolean | null>(null);
-  const [activeTestPage, setActiveTestPage] = useState(false);
   const [settings, setSettings] = useState<any>({});
   const [showAboutGlobal, setShowAboutGlobal] = useState(false);
   const [isGuest, setIsGuest] = useState(false);
@@ -3548,12 +3705,11 @@ export default function App() {
   // Login
   if (!user) return <LoginPage onLogin={handleLogin} onGuest={() => setIsGuest(true)} />;
 
-  const isTestingMode = settings.testing_mode === 'true';
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12"
-      onContextMenu={isTestingMode ? undefined : (e) => e.preventDefault()}
-      style={{ userSelect: isTestingMode ? undefined : 'none', WebkitUserSelect: isTestingMode ? undefined : 'none' }}>
+      onContextMenu={(e) => e.preventDefault()}
+      style={{ userSelect: 'none', WebkitUserSelect: 'none' as any }}>
       <ToastContainer />
       {showAboutGlobal && <AboutModal onClose={() => setShowAboutGlobal(false)} />}
       <nav className="bg-white/80 backdrop-blur-md border-b border-slate-100 px-4 sm:px-6 py-4 sticky top-0 z-50">
@@ -3565,14 +3721,6 @@ export default function App() {
             <h1 className="font-bold text-slate-900 text-base sm:text-lg tracking-tight hidden sm:block truncate">Manajemen Kelas</h1>
           </div>
           <div className="flex items-center gap-2 sm:gap-4">
-            {/* Test page nav - only admin & testing mode */}
-            {user.role === 'admin' && isTestingMode && (
-              <button onClick={() => setActiveTestPage(!activeTestPage)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all ${activeTestPage ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200'}`}>
-                <FlaskConical size={14} />
-                <span className="hidden sm:inline">Testing</span>
-              </button>
-            )}
             <div className="hidden sm:flex flex-col items-end">
               <span className="text-sm font-bold text-slate-900 truncate max-w-[120px]">{user.name}</span>
               <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">{user.role}</span>
@@ -3589,11 +3737,9 @@ export default function App() {
       </nav>
 
       <main className="py-6 sm:py-8">
-        {user.role === 'admin' && activeTestPage
-          ? <TestingPage />
-          : user.role === 'admin'
-            ? <AdminDashboard user={user} />
-            : <PJDashboard user={user} />
+        {user.role === 'admin'
+          ? <AdminDashboard user={user} onLoginAs={handleLogin} />
+          : <PJDashboard user={user} />
         }
       </main>
     </div>

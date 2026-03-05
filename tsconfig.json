@@ -10,6 +10,7 @@
       "DOM.Iterable"
     ],
     "skipLibCheck": true,
+    "skipDefaultLibCheck": true,
     "moduleResolution": "bundler",
     "isolatedModules": true,
     "moduleDetection": "force",
@@ -21,6 +22,7 @@
       ]
     },
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "types": []
   }
 }
