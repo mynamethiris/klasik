@@ -27,6 +27,7 @@ async function getInitializedDB() {
       `CREATE TABLE IF NOT EXISTS admin_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, message TEXT, pj_id INTEGER, pj_name TEXT, is_read INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
       `CREATE TABLE IF NOT EXISTS pending_approvals (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, pj_id INTEGER NOT NULL, pj_name TEXT, data TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
       `CREATE TABLE IF NOT EXISTS jadwal_pelajaran (id INTEGER PRIMARY KEY AUTOINCREMENT, hari TEXT, jam_ke INTEGER, jam_mulai TEXT, jam_selesai TEXT, mata_pelajaran TEXT, guru TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
+      `CREATE TABLE IF NOT EXISTS promo_links (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL DEFAULT 'link', label TEXT NOT NULL, url TEXT NOT NULL, sort_order INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
     ];
     for (const sql of createStatements) { await db.execute(sql); }
     const defaults = [
@@ -294,7 +295,7 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
     }
 
     if (method === "POST" && segments[0] === "report" && segments[2] === "edit-photo") {
-      const { file } = parseMultipart(event);
+      const { fields, file } = parseMultipart(event);
       const r = await db.execute({ sql: "SELECT * FROM reports WHERE id = ?", args: [segments[1]] });
       if (r.rows.length === 0) return json(404, { success: false, message: "Laporan tidak ditemukan" });
       const row = r.rows[0];
@@ -306,13 +307,20 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
         if ((Date.now() - sub.getTime()) / 60000 > parseInt((sRes.rows[0]?.value as string) || "15"))
           return json(403, { success: false, message: `Batas waktu edit (${sRes.rows[0]?.value || 15} menit) telah terlewati` });
       }
-      let photoUrl = row.cleaning_photo as string;
+      // Tentukan tipe foto: 'checkin' atau 'cleaning' (default cleaning)
+      const photoType = fields.photoType || "cleaning";
+      let photoUrl = (photoType === "checkin" ? row.checkin_photo : row.cleaning_photo) as string;
       if (file) {
         await db.execute({ sql: "INSERT OR REPLACE INTO file_uploads (filename, data, mime_type) VALUES (?, ?, ?)", args: [file.filename, file.data, file.mimeType] });
         photoUrl = `/uploads/${file.filename}`;
       }
-      await db.execute({ sql: "UPDATE reports SET cleaning_photo = ? WHERE id = ?", args: [photoUrl, segments[1]] });
-      return json(200, { success: true });
+      if (photoType === "checkin") {
+        await db.execute({ sql: "UPDATE reports SET checkin_photo = ? WHERE id = ?", args: [photoUrl, segments[1]] });
+      } else {
+        await db.execute({ sql: "UPDATE reports SET cleaning_photo = ? WHERE id = ?", args: [photoUrl, segments[1]] });
+      }
+      // Kembalikan URL baru agar frontend bisa update tampilan tanpa reload
+      return json(200, { success: true, photoUrl, photoType });
     }
 
     if (method === "POST" && segments[0] === "report" && segments[2] === "edit-absents") {
@@ -827,23 +835,56 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
       return json(200, { success: true, message: "Rekompresi foto tidak diperlukan di mode cloud (foto sudah dikompres saat upload)." });
     }
 
+    // --- PROMO LINKS (Easter Egg / About section) ---
+    if (method === "GET" && segments[0] === "promo-links" && !segments[1]) {
+      const r = await db.execute("SELECT * FROM promo_links ORDER BY sort_order ASC, id ASC");
+      return json(200, r.rows);
+    }
+
+    if (method === "POST" && segments[0] === "promo-links" && !segments[1]) {
+      const { type, label, url, sort_order } = JSON.parse(event.body || "{}");
+      if (!label || !url) return json(400, { success: false, message: "Label dan URL wajib diisi" });
+      await db.execute({
+        sql: "INSERT INTO promo_links (type, label, url, sort_order) VALUES (?, ?, ?, ?)",
+        args: [type || "link", label, url, sort_order ?? 0],
+      });
+      return json(200, { success: true });
+    }
+
+    if (method === "PUT" && segments[0] === "promo-links" && segments[1]) {
+      const { type, label, url, sort_order } = JSON.parse(event.body || "{}");
+      if (!label || !url) return json(400, { success: false, message: "Label dan URL wajib diisi" });
+      await db.execute({
+        sql: "UPDATE promo_links SET type = ?, label = ?, url = ?, sort_order = ? WHERE id = ?",
+        args: [type || "link", label, url, sort_order ?? 0, segments[1]],
+      });
+      return json(200, { success: true });
+    }
+
+    if (method === "DELETE" && segments[0] === "promo-links" && segments[1]) {
+      await db.execute({ sql: "DELETE FROM promo_links WHERE id = ?", args: [segments[1]] });
+      return json(200, { success: true });
+    }
+
     // Admin edit report photo (no time limit)
     if (method === "POST" && segments[0] === "admin" && segments[1] === "report" && segments[3] === "edit-photo") {
       const reportId = segments[2];
       const { fields, file } = parseMultipart(event);
-      const photoType = fields.photo_type || "cleaning";
+      const photoType = fields.photo_type || fields.photoType || "cleaning";
       let photoPath = "";
       if (file) {
         const filename = file.filename;
         await db.execute({ sql: "INSERT OR REPLACE INTO file_uploads (filename, data, mime_type) VALUES (?, ?, ?)", args: [filename, file.data, file.mimeType] });
-        photoPath = `/api/uploads/${filename}`;
+        // Gunakan /uploads/ (bukan /api/uploads/) agar konsisten dengan route uploads function
+        photoPath = `/uploads/${filename}`;
       }
       if (photoType === "checkin") {
         await db.execute({ sql: "UPDATE reports SET checkin_photo = ? WHERE id = ?", args: [photoPath, reportId] });
       } else {
         await db.execute({ sql: "UPDATE reports SET cleaning_photo = ? WHERE id = ?", args: [photoPath, reportId] });
       }
-      return json(200, { success: true });
+      // Kembalikan URL baru agar frontend bisa update tampilan tanpa reload
+      return json(200, { success: true, photoUrl: photoPath, photoType });
     }
 
     // Admin edit report absents (no time limit)

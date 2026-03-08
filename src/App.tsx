@@ -15,6 +15,80 @@ import { SCHOOL_LAT, SCHOOL_LON, MAX_DISTANCE_METERS, getDistance, getCurrentWIB
 import confettiLib from 'canvas-confetti';
 const confetti = (opts?: confettiLib.Options) => confettiLib(opts);
 
+// --- IMAGE COMPRESSION UTILITY ---
+/**
+ * Kompres gambar menggunakan Canvas API.
+ * - Resize: jika lebar/tinggi > 1280px, kecilkan secara proporsional.
+ * - Quality: 0.7 (70%)
+ * - Format output: image/jpeg
+ * - Returns: Promise<File> yang valid untuk FormData
+ */
+async function compressImage(file: File): Promise<File> {
+  return new Promise((resolve, reject) => {
+    // Validasi: pastikan file adalah gambar
+    if (!file || !file.type.startsWith('image/')) {
+      reject(new Error('File bukan gambar yang valid'));
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl); // cleanup segera setelah load
+
+      const MAX_SIZE = 1280;
+      let { width, height } = img;
+
+      // Resize proporsional jika melebihi MAX_SIZE
+      if (width > MAX_SIZE || height > MAX_SIZE) {
+        if (width > height) {
+          height = Math.round((height * MAX_SIZE) / width);
+          width = MAX_SIZE;
+        } else {
+          width = Math.round((width * MAX_SIZE) / height);
+          height = MAX_SIZE;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Gagal membuat canvas context'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error('Gagal mengompres gambar'));
+            return;
+          }
+          // Buat File dari Blob agar bisa masuk FormData dengan nama yang benar
+          const compressedFile = new File(
+            [blob],
+            file.name.replace(/\.[^.]+$/, '') + '.jpg',
+            { type: 'image/jpeg', lastModified: Date.now() }
+          );
+          resolve(compressedFile);
+        },
+        'image/jpeg',
+        0.7 // quality 70%
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Gagal memuat gambar untuk kompresi'));
+    };
+
+    img.src = objectUrl;
+  });
+}
+
 // --- TOAST NOTIFICATION SYSTEM ---
 type ToastType = 'success' | 'error' | 'info' | 'warning';
 interface ToastItem { id: number; message: string; type: ToastType; }
@@ -1311,6 +1385,15 @@ const PJDashboard = ({ user }: { user: User }) => {
   const [editingReport, setEditingReport] = useState<Report | null>(null);
   const [editPhoto, setEditPhoto] = useState<File | null>(null);
   const [editPhotoType, setEditPhotoType] = useState<'cleaning' | 'checkin'>('cleaning');
+  const [editPhotoUrl, setEditPhotoUrl] = useState<string | null>(null);
+
+  // Buat dan bersihkan Object URL untuk editPhoto agar tidak memory leak / blank
+  useEffect(() => {
+    if (!editPhoto) { setEditPhotoUrl(null); return; }
+    const url = URL.createObjectURL(editPhoto);
+    setEditPhotoUrl(url);
+    return () => URL.revokeObjectURL(url); // cleanup saat file berubah atau komponen unmount
+  }, [editPhoto]);
   const [editAbsents, setEditAbsents] = useState<{ member: ClassMember; reason: MemberStatus }[]>([]);
   const [editAbsentSearch, setEditAbsentSearch] = useState('');
   const [editAbsentShowSugg, setEditAbsentShowSugg] = useState(false);
@@ -1481,7 +1564,12 @@ const PJDashboard = ({ user }: { user: User }) => {
     const time = getCurrentWIBTime();
     const formData = new FormData();
     formData.append('pj_id', user.id.toString());
-    formData.append('photo', photo);
+    try {
+      const compressed = await compressImage(photo);
+      formData.append('photo', compressed);
+    } catch {
+      formData.append('photo', photo); // fallback ke file asli jika kompresi gagal
+    }
     formData.append('latitude', (location?.lat || SCHOOL_LAT).toString());
     formData.append('longitude', (location?.lon || SCHOOL_LON).toString());
     if (location?.accuracy) formData.append('accuracy', location.accuracy.toString());
@@ -1578,7 +1666,12 @@ const PJDashboard = ({ user }: { user: User }) => {
 
     const formData = new FormData();
     formData.append('pj_id', user.id.toString());
-    formData.append('photo', cleaningPhoto);
+    try {
+      const compressed = await compressImage(cleaningPhoto);
+      formData.append('photo', compressed);
+    } catch {
+      formData.append('photo', cleaningPhoto); // fallback ke file asli
+    }
     formData.append('description', desc);
     formData.append('absentMembers', JSON.stringify([...pjAbsentEntry, ...absentPjMembers, ...absentList]));
     try {
@@ -1602,14 +1695,31 @@ const PJDashboard = ({ user }: { user: User }) => {
     try {
       // Save photo if changed
       if (editPhoto) {
+        if (!editPhoto.type.startsWith('image/')) {
+          toast.error('File yang dipilih bukan gambar yang valid');
+          setEditSubmitting(false);
+          return;
+        }
         const formData = new FormData();
-        formData.append('photo', editPhoto);
+        try {
+          const compressed = await compressImage(editPhoto);
+          formData.append('photo', compressed);
+        } catch {
+          formData.append('photo', editPhoto); // fallback
+        }
         formData.append('photoType', editPhotoType);
-        await safeFetch(`/api/report/${editingReport.id}/edit-photo`, { method: 'POST', body: formData });
+        const photoResult = await safeFetch(`/api/report/${editingReport.id}/edit-photo`, { method: 'POST', body: formData });
+        // Update objek report di history lokal langsung agar gambar tampil tanpa reload
+        if (photoResult?.photoUrl) {
+          setHistory(prev => prev.map(r => {
+            if (r.id !== editingReport.id) return r;
+            if (photoResult.photoType === 'checkin') return { ...r, checkin_photo: photoResult.photoUrl };
+            return { ...r, cleaning_photo: photoResult.photoUrl };
+          }));
+        }
       }
       // Save absent members
       const absentList = editAbsents.map(({ member, reason }) => ({ member_id: member.id, name: member.name, reason }));
-      const allPjMembers = allMembers.filter(m => m.pj_id === user.id);
       const desc = absentList.length > 0 ? absentList.map(a => `${a.name} - ${a.reason}`).join('\n') : 'Semua anggota hadir';
       await safeFetch(`/api/report/${editingReport.id}/edit-absents`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1966,11 +2076,20 @@ const PJDashboard = ({ user }: { user: User }) => {
                       <label className="flex flex-col items-center p-5 bg-white rounded-2xl border-2 border-dashed border-slate-200 cursor-pointer hover:border-emerald-400 transition-all">
                         <Camera size={24} className="text-slate-400 mb-2" />
                         <span className="text-sm font-bold text-slate-600">{editPhoto ? editPhoto.name : 'Pilih foto baru (kosongkan jika tidak diganti)'}</span>
-                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => setEditPhoto(e.target.files?.[0] || null)} />
+                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file && !file.type.startsWith('image/')) {
+                            toast.error('File harus berupa gambar (JPG, PNG, dll)');
+                            e.target.value = '';
+                            return;
+                          }
+                          setEditPhoto(file || null);
+                        }} />
                       </label>
-                      {editPhoto && (
+                      {editPhoto && editPhotoUrl && (
                         <div className="rounded-2xl overflow-hidden aspect-video">
-                          <img src={URL.createObjectURL(editPhoto)} alt="Preview" className="w-full h-full object-cover" />
+                          <img src={editPhotoUrl} alt="Preview" className="w-full h-full object-cover"
+                            onError={() => toast.error('Gagal memuat pratinjau gambar')} />
                         </div>
                       )}
                     </div>
@@ -2488,6 +2607,15 @@ const AdminDashboard = ({ user, onLoginAs }: { user: User; onLoginAs: (u: User) 
   const [adminEditingReport, setAdminEditingReport] = useState<any | null>(null);
   const [adminEditPhoto, setAdminEditPhoto] = useState<File | null>(null);
   const [adminEditPhotoType, setAdminEditPhotoType] = useState<'cleaning' | 'checkin'>('cleaning');
+  const [adminEditPhotoUrl, setAdminEditPhotoUrl] = useState<string | null>(null);
+
+  // Buat dan bersihkan Object URL untuk adminEditPhoto agar tidak memory leak / blank
+  useEffect(() => {
+    if (!adminEditPhoto) { setAdminEditPhotoUrl(null); return; }
+    const url = URL.createObjectURL(adminEditPhoto);
+    setAdminEditPhotoUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [adminEditPhoto]);
   const [adminEditAbsents, setAdminEditAbsents] = useState<{ member: ClassMember; reason: MemberStatus }[]>([]);
   const [adminEditAbsentSearch, setAdminEditAbsentSearch] = useState('');
   const [adminEditShowSugg, setAdminEditShowSugg] = useState(false);
@@ -2568,9 +2696,22 @@ const AdminDashboard = ({ user, onLoginAs }: { user: User; onLoginAs: (u: User) 
     try {
       if (adminEditPhoto) {
         const formData = new FormData();
-        formData.append('photo', adminEditPhoto);
+        try {
+          const compressed = await compressImage(adminEditPhoto);
+          formData.append('photo', compressed);
+        } catch {
+          formData.append('photo', adminEditPhoto); // fallback
+        }
         formData.append('photoType', adminEditPhotoType);
-        await safeFetch(`/api/admin/report/${adminEditingReport.id}/edit-photo`, { method: 'POST', body: formData });
+        const photoResult = await safeFetch(`/api/admin/report/${adminEditingReport.id}/edit-photo`, { method: 'POST', body: formData });
+        // Update laporan di state lokal langsung agar gambar tampil tanpa reload
+        if (photoResult?.photoUrl) {
+          setReports(prev => prev.map(r => {
+            if (r.id !== adminEditingReport.id) return r;
+            if (photoResult.photoType === 'checkin') return { ...r, checkin_photo: photoResult.photoUrl };
+            return { ...r, cleaning_photo: photoResult.photoUrl };
+          }));
+        }
       }
       const absentList = adminEditAbsents.map(({ member, reason }) => ({ member_id: member.id, name: member.name, reason }));
       const desc = absentList.length > 0 ? absentList.map(a => `${a.name} - ${a.reason}`).join('\n') : 'Semua anggota hadir';
@@ -2834,7 +2975,10 @@ const AdminDashboard = ({ user, onLoginAs }: { user: User; onLoginAs: (u: User) 
                   <label className="flex flex-col items-center justify-center gap-2 p-5 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition-all">
                     {adminEditPhoto ? (
                       <>
-                        <img src={URL.createObjectURL(adminEditPhoto)} alt="Preview" className="w-full max-h-40 object-cover rounded-xl" />
+                        {adminEditPhotoUrl && (
+                          <img src={adminEditPhotoUrl} alt="Preview" className="w-full max-h-40 object-cover rounded-xl"
+                            onError={() => toast.error('Gagal memuat pratinjau gambar')} />
+                        )}
                         <span className="text-xs font-bold text-blue-600">{adminEditPhoto.name}</span>
                       </>
                     ) : (
@@ -2843,7 +2987,15 @@ const AdminDashboard = ({ user, onLoginAs }: { user: User; onLoginAs: (u: User) 
                         <span className="text-xs font-bold text-slate-500">Pilih foto baru (opsional)</span>
                       </>
                     )}
-                    <input type="file" accept="image/*" className="hidden" onChange={e => setAdminEditPhoto(e.target.files?.[0] || null)} />
+                    <input type="file" accept="image/*" className="hidden" onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file && !file.type.startsWith('image/')) {
+                        toast.error('File harus berupa gambar (JPG, PNG, dll)');
+                        e.target.value = '';
+                        return;
+                      }
+                      setAdminEditPhoto(file || null);
+                    }} />
                   </label>
                 </div>
 
