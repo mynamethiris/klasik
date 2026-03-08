@@ -27,7 +27,6 @@ async function getInitializedDB() {
       `CREATE TABLE IF NOT EXISTS admin_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, message TEXT, pj_id INTEGER, pj_name TEXT, is_read INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
       `CREATE TABLE IF NOT EXISTS pending_approvals (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, pj_id INTEGER NOT NULL, pj_name TEXT, data TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
       `CREATE TABLE IF NOT EXISTS jadwal_pelajaran (id INTEGER PRIMARY KEY AUTOINCREMENT, hari TEXT, jam_ke INTEGER, jam_mulai TEXT, jam_selesai TEXT, mata_pelajaran TEXT, guru TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
-      `CREATE TABLE IF NOT EXISTS promo_links (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL DEFAULT 'link', label TEXT NOT NULL, url TEXT NOT NULL, sort_order INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
     ];
     for (const sql of createStatements) { await db.execute(sql); }
     const defaults = [
@@ -826,37 +825,6 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
     // Admin recompress images (no-op on Netlify/Turso since images stored as base64 in DB)
     if (method === "POST" && segments[0] === "admin" && segments[1] === "recompress-images") {
       return json(200, { success: true, message: "Rekompresi foto tidak diperlukan di mode cloud (foto sudah dikompres saat upload)." });
-    }
-
-    // --- PROMO LINKS (Easter Egg / About section) ---
-    if (method === "GET" && segments[0] === "promo-links" && !segments[1]) {
-      const r = await db.execute("SELECT * FROM promo_links ORDER BY sort_order ASC, id ASC");
-      return json(200, r.rows);
-    }
-
-    if (method === "POST" && segments[0] === "promo-links" && !segments[1]) {
-      const { type, label, url, sort_order } = JSON.parse(event.body || "{}");
-      if (!label || !url) return json(400, { success: false, message: "Label dan URL wajib diisi" });
-      await db.execute({
-        sql: "INSERT INTO promo_links (type, label, url, sort_order) VALUES (?, ?, ?, ?)",
-        args: [type || "link", label, url, sort_order ?? 0],
-      });
-      return json(200, { success: true });
-    }
-
-    if (method === "PUT" && segments[0] === "promo-links" && segments[1]) {
-      const { type, label, url, sort_order } = JSON.parse(event.body || "{}");
-      if (!label || !url) return json(400, { success: false, message: "Label dan URL wajib diisi" });
-      await db.execute({
-        sql: "UPDATE promo_links SET type = ?, label = ?, url = ?, sort_order = ? WHERE id = ?",
-        args: [type || "link", label, url, sort_order ?? 0, segments[1]],
-      });
-      return json(200, { success: true });
-    }
-
-    if (method === "DELETE" && segments[0] === "promo-links" && segments[1]) {
-      await db.execute({ sql: "DELETE FROM promo_links WHERE id = ?", args: [segments[1]] });
-      return json(200, { success: true });
     }
 
     // Admin edit report photo (no time limit)
