@@ -113,6 +113,9 @@ const migrations: [string, string][] = [
   ["pj_id FROM class_members", "ALTER TABLE class_members ADD COLUMN pj_id INTEGER REFERENCES users(id)"],
   ["member_id FROM absent_members", "ALTER TABLE absent_members ADD COLUMN member_id INTEGER REFERENCES class_members(id)"],
   ["is_read FROM reports", "ALTER TABLE reports ADD COLUMN is_read INTEGER DEFAULT 0"],
+  ["substitute_member_id FROM substitutions", "ALTER TABLE substitutions ADD COLUMN substitute_member_id INTEGER REFERENCES class_members(id)"],
+  ["substitute_member_name FROM substitutions", "ALTER TABLE substitutions ADD COLUMN substitute_member_name TEXT"],
+  ["is_own_member FROM substitutions", "ALTER TABLE substitutions ADD COLUMN is_own_member INTEGER DEFAULT 0"],
 ];
 for (const [check, alter] of migrations) {
   try { db.prepare(`SELECT ${check} LIMIT 1`).get(); }
@@ -273,7 +276,8 @@ async function startServer() {
 
   app.post("/api/login", (req, res) => {
     const { account_code } = req.body;
-    const user = db.prepare("SELECT * FROM users WHERE account_code = ?").get(account_code) as any;
+    const cleanCode = (account_code || '').toString().trim().toUpperCase();
+    const user = db.prepare("SELECT * FROM users WHERE UPPER(TRIM(account_code)) = ?").get(cleanCode) as any;
     if (user) {
       res.json({ success: true, user: { id: user.id, name: user.name, role: user.role, group_name: user.group_name } });
     } else {
@@ -329,6 +333,10 @@ async function startServer() {
   app.post("/api/users/reset", (req, res) => {
     db.prepare("DELETE FROM substitutions").run();
     db.prepare("DELETE FROM schedules WHERE group_name IN (SELECT group_name FROM users WHERE role = 'pj' AND group_name IS NOT NULL)").run();
+    db.prepare("DELETE FROM absent_members WHERE report_id IN (SELECT id FROM reports WHERE pj_id IN (SELECT id FROM users WHERE role = 'pj'))").run();
+    db.prepare("DELETE FROM reports WHERE pj_id IN (SELECT id FROM users WHERE role = 'pj')").run();
+    db.prepare("DELETE FROM violations WHERE pj_id IN (SELECT id FROM users WHERE role = 'pj')").run();
+    db.prepare("DELETE FROM admin_notifications").run();
     db.prepare("UPDATE class_members SET pj_id = NULL").run();
     db.prepare("DELETE FROM users WHERE role != 'admin'").run();
     res.json({ success: true });
@@ -428,6 +436,7 @@ async function startServer() {
 
   app.post("/api/members/reset", (req, res) => {
     db.prepare("UPDATE users SET member_id = NULL").run();
+    db.prepare("UPDATE class_members SET pj_id = NULL").run();
     db.prepare("DELETE FROM class_members").run();
     res.json({ success: true });
   });
@@ -439,10 +448,13 @@ async function startServer() {
       members = db.prepare("SELECT * FROM class_members WHERE pj_id = ?").all(pj_id);
     } else {
       members = db.prepare(`
-        SELECT m.*, u1.name as pj_name, u1.group_name as pj_group, u2.group_name as is_pj_group
+        SELECT m.*, u1.name as pj_name, u1.group_name as pj_group, u2.group_name as is_pj_group,
+          CASE WHEN s.id IS NOT NULL THEN 1 ELSE 0 END as substituted_out,
+          s.id as active_sub_id
         FROM class_members m
         LEFT JOIN users u1 ON m.pj_id = u1.id
         LEFT JOIN users u2 ON m.id = u2.member_id AND u2.role = 'pj'
+        LEFT JOIN substitutions s ON s.substitute_member_id = m.id AND s.status IN ('pending','accepted') AND s.is_own_member = 1
       `).all();
     }
     res.json(members);
@@ -898,10 +910,11 @@ async function startServer() {
     const base = `
       SELECT s.*,
         r.name  AS requester_name,  r.group_name  AS requester_group,
-        sub.name AS substitute_name, sub.group_name AS substitute_group
+        COALESCE(sub.name, s.substitute_member_name) AS substitute_name,
+        sub.group_name AS substitute_group
       FROM substitutions s
       JOIN users r   ON s.requester_pj_id  = r.id
-      JOIN users sub ON s.substitute_pj_id = sub.id`;
+      LEFT JOIN users sub ON s.substitute_pj_id = sub.id`;
     const rows = pj_id
       ? db.prepare(`${base} WHERE s.requester_pj_id = ? OR s.substitute_pj_id = ? ORDER BY s.original_date ASC`).all(pj_id, pj_id)
       : db.prepare(`${base} ORDER BY s.original_date ASC`).all();
@@ -949,32 +962,66 @@ async function startServer() {
 
   // POST buat substitusi baru
   app.post("/api/substitutions", (req, res) => {
-    const { requester_pj_id, substitute_pj_id, original_date, substitute_date } = req.body;
-    if (!requester_pj_id || !substitute_pj_id || !original_date)
-      return res.status(400).json({ success: false, message: "Data tidak lengkap" });
+    try {
+      const { requester_pj_id, substitute_pj_id, original_date, substitute_date, substitute_member_name, is_own_member } = req.body;
 
-    // Cegah duplikat aktif di tanggal yang sama
-    const dup = db.prepare(`
-      SELECT id FROM substitutions
-      WHERE status IN ('pending','accepted')
-        AND ((requester_pj_id = ? AND original_date = ?)
-          OR (substitute_pj_id = ? AND original_date = ?))
-    `).get(requester_pj_id, original_date, substitute_pj_id, original_date) as any;
-    if (dup) return res.status(400).json({ success: false, message: "Sudah ada permintaan aktif untuk tanggal tersebut" });
+      // Normalize: accept both boolean true and string "true"
+      const reqPjId = requester_pj_id ? parseInt(requester_pj_id) : null;
+      const subPjIdRaw = substitute_pj_id ? parseInt(substitute_pj_id) : null;
 
-    db.prepare(`INSERT INTO substitutions (requester_pj_id, substitute_pj_id, original_date, substitute_date, status)
-      VALUES (?, ?, ?, ?, 'pending')`)
-      .run(requester_pj_id, substitute_pj_id, original_date, substitute_date || null);
+      // Deteksi isOwnMember: flag eksplisit ATAU substitute_pj_id == requester_pj_id (self-id trick)
+      const isOwnMember = is_own_member === true || is_own_member === 'true' || is_own_member === 1
+        || (!!substitute_member_name && subPjIdRaw === reqPjId);
 
-    const reqPJ = db.prepare("SELECT name FROM users WHERE id = ?").get(requester_pj_id) as any;
-    const subPJ = db.prepare("SELECT name FROM users WHERE id = ?").get(substitute_pj_id) as any;
-    db.prepare("INSERT INTO admin_notifications (type, message, pj_id, pj_name) VALUES (?, ?, ?, ?)").run(
-      'substitution',
-      `${reqPJ?.name} meminta ${subPJ?.name} menggantikan piket pada ${original_date}` +
-      (substitute_date ? ` (balasan: ${substitute_date})` : ''),
-      requester_pj_id, reqPJ?.name || ''
-    );
-    res.json({ success: true });
+      // Jika own member, substitute_pj_id harus NULL di DB (bukan self-id)
+      const subPjId = isOwnMember ? null : subPjIdRaw;
+
+      if (!reqPjId || !original_date)
+        return res.status(400).json({ success: false, message: "Data tidak lengkap: requester_pj_id atau original_date kosong" });
+      if (!isOwnMember && !subPjId)
+        return res.status(400).json({ success: false, message: "Data tidak lengkap: pilih PJ pengganti atau anggota sendiri" });
+      if (isOwnMember && !substitute_member_name)
+        return res.status(400).json({ success: false, message: "Data tidak lengkap: nama anggota pengganti kosong" });
+
+      // Cegah duplikat aktif di tanggal yang sama
+      const dup = db.prepare(`
+        SELECT id FROM substitutions
+        WHERE status IN ('pending','accepted')
+          AND requester_pj_id = ? AND original_date = ?
+      `).get(reqPjId, original_date) as any;
+      if (dup) return res.status(400).json({ success: false, message: "Sudah ada permintaan aktif untuk tanggal tersebut" });
+
+      const reqPJ = db.prepare("SELECT name FROM users WHERE id = ?").get(reqPjId) as any;
+
+      if (isOwnMember) {
+        // Cari member_id dari nama anggota — cari di kelompok PJ ini (lewat pj_id) ATAU lewat nama saja
+        let member = db.prepare("SELECT id FROM class_members WHERE name = ? AND pj_id = ?").get(substitute_member_name, reqPjId) as any;
+        if (!member) {
+          // Fallback: cari berdasarkan nama saja
+          member = db.prepare("SELECT id FROM class_members WHERE name = ?").get(substitute_member_name) as any;
+        }
+
+        db.prepare(`INSERT INTO substitutions (requester_pj_id, substitute_pj_id, original_date, substitute_date, status, substitute_member_id, substitute_member_name, is_own_member)
+          VALUES (?, NULL, ?, NULL, 'accepted', ?, ?, 1)`)
+          .run(reqPjId, original_date, member?.id || null, substitute_member_name);
+      } else {
+        db.prepare(`INSERT INTO substitutions (requester_pj_id, substitute_pj_id, original_date, substitute_date, status, is_own_member)
+          VALUES (?, ?, ?, ?, 'pending', 0)`)
+          .run(reqPjId, subPjId, original_date, substitute_date || null);
+
+        const subPJ = db.prepare("SELECT name FROM users WHERE id = ?").get(subPjId) as any;
+        db.prepare("INSERT INTO admin_notifications (type, message, pj_id, pj_name) VALUES (?, ?, ?, ?)").run(
+          'substitution',
+          `${reqPJ?.name || 'PJ'} meminta ${subPJ?.name || 'PJ lain'} menggantikan piket pada ${original_date}` +
+          (substitute_date ? ` (balasan: ${substitute_date})` : ''),
+          reqPjId, reqPJ?.name || ''
+        );
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('POST /api/substitutions error:', err);
+      res.status(500).json({ success: false, message: err.message || 'Gagal menyimpan substitusi' });
+    }
   });
 
   app.put("/api/substitutions/:id", (req, res) => {

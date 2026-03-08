@@ -5,7 +5,7 @@
 
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["@libsql/client", "@libsql/client/http", "@libsql/linux-x64-gnu", "@libsql/darwin-arm64"]
+  external_node_modules = ["@libsql/client", "@libsql/client/http"]
 
 [[redirects]]
   from = "/api/*"
@@ -23,8 +23,6 @@
   status = 200
 
 [dev]
-  # netlify dev menjalankan frontend (Vite) dan otomatis expose functions di port 8888
-  # Vite akan mendeteksi NETLIFY=true dan proxy ke port 8888
   command = "npm run dev:frontend"
   targetPort = 5173
   port = 8888

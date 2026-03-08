@@ -10,7 +10,6 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "start": "tsx server.ts",
     "netlify:dev": "netlify dev"
   },
   "dependencies": {
@@ -26,17 +25,17 @@
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "multer": "^1.4.5-lts.1",
-    "sharp": "^0.34.2",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "vite": "^6.2.0"
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "sharp": "^0.34.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^4.17.21",
     "@types/multer": "^1.4.12",
     "@types/node": "^22.14.0",
-    "@types/react": "^19.2.14",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.21",
     "netlify-cli": "^17.38.0",
     "tailwindcss": "^4.1.14",

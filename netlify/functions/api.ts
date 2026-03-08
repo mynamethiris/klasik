@@ -4,6 +4,7 @@ async function getDB() {
   const url = process.env.TURSO_DATABASE_URL;
   const authToken = process.env.TURSO_AUTH_TOKEN;
   if (!url) throw new Error("TURSO_DATABASE_URL belum diset. Buka Netlify → Site Settings → Environment Variables dan tambahkan TURSO_DATABASE_URL dan TURSO_AUTH_TOKEN. Daftar Turso gratis di https://turso.tech");
+  // @ts-ignore - Module may not have types at this subpath
   const { createClient } = await import("@libsql/client/http");
   return createClient({ url, authToken });
 }
@@ -25,6 +26,7 @@ async function getInitializedDB() {
       `CREATE TABLE IF NOT EXISTS violations (id INTEGER PRIMARY KEY AUTOINCREMENT, member_id INTEGER, member_name TEXT, pj_id INTEGER, date TEXT, type TEXT, notes TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
       `CREATE TABLE IF NOT EXISTS admin_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, message TEXT, pj_id INTEGER, pj_name TEXT, is_read INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
       `CREATE TABLE IF NOT EXISTS pending_approvals (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, pj_id INTEGER NOT NULL, pj_name TEXT, data TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
+      `CREATE TABLE IF NOT EXISTS jadwal_pelajaran (id INTEGER PRIMARY KEY AUTOINCREMENT, hari TEXT, jam_ke INTEGER, jam_mulai TEXT, jam_selesai TEXT, mata_pelajaran TEXT, guru TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
     ];
     for (const sql of createStatements) { await db.execute(sql); }
     const defaults = [
@@ -39,7 +41,7 @@ async function getInitializedDB() {
       await db.execute({ sql: "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", args: [k, v] });
     }
     // Migrations for existing tables
-    try { await db.execute("ALTER TABLE reports ADD COLUMN is_read INTEGER DEFAULT 0"); } catch {}
+    try { await db.execute("ALTER TABLE reports ADD COLUMN is_read INTEGER DEFAULT 0"); } catch { }
     _dbInitialized = true;
   }
   return db;
@@ -82,7 +84,7 @@ function parseMultipart(event: HandlerEvent): { fields: Record<string, string>; 
       } else { fields[fieldName] = body; }
     }
   } else if (contentType.includes("application/json")) {
-    try { Object.assign(fields, JSON.parse(event.body || "{}")); } catch {}
+    try { Object.assign(fields, JSON.parse(event.body || "{}")); } catch { }
   } else if (contentType.includes("application/x-www-form-urlencoded")) {
     new URLSearchParams(event.body || "").forEach((v, k) => { fields[k] = v; });
   }
@@ -148,7 +150,7 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
 
     if (method === "GET" && segments[0] === "settings") {
       const r = await db.execute("SELECT * FROM settings");
-      const obj = r.rows.reduce<Record<string, string>>((acc, row) => { acc[row.key as string] = row.value as string; return acc; }, {});
+      const obj = (r.rows as any[]).reduce<Record<string, string>>((acc, row) => { acc[row.key as string] = row.value as string; return acc; }, {});
       return json(200, obj);
     }
 
@@ -213,6 +215,12 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
     }
 
     if (method === "POST" && segments[0] === "users" && segments[1] === "reset") {
+      await db.execute("DELETE FROM substitutions");
+      await db.execute("DELETE FROM schedules WHERE group_name IN (SELECT group_name FROM users WHERE role = 'pj' AND group_name IS NOT NULL)");
+      await db.execute("DELETE FROM absent_members WHERE report_id IN (SELECT id FROM reports WHERE pj_id IN (SELECT id FROM users WHERE role = 'pj'))");
+      await db.execute("DELETE FROM reports WHERE pj_id IN (SELECT id FROM users WHERE role = 'pj')");
+      await db.execute("DELETE FROM violations WHERE pj_id IN (SELECT id FROM users WHERE role = 'pj')");
+      await db.execute("DELETE FROM admin_notifications");
       await db.execute("UPDATE class_members SET pj_id = NULL");
       await db.execute("DELETE FROM users WHERE role != 'admin'");
       return json(200, { success: true });
@@ -220,6 +228,7 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
 
     if (method === "POST" && segments[0] === "members" && segments[1] === "reset") {
       await db.execute("UPDATE users SET member_id = NULL");
+      await db.execute("UPDATE class_members SET pj_id = NULL");
       await db.execute("DELETE FROM class_members");
       return json(200, { success: true });
     }
@@ -341,6 +350,11 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
 
     if (method === "DELETE" && segments[0] === "reports" && segments[1] && segments[1] !== "reset") {
       await db.execute({ sql: "DELETE FROM absent_members WHERE report_id = ?", args: [segments[1]] });
+      const reportRes = await db.execute({ sql: "SELECT * FROM reports WHERE id = ?", args: [segments[1]] });
+      if (reportRes.rows.length > 0) {
+        const report = reportRes.rows[0];
+        await db.execute({ sql: "DELETE FROM violations WHERE date = ? AND pj_id = ?", args: [report.date, report.pj_id] });
+      }
       await db.execute({ sql: "DELETE FROM reports WHERE id = ?", args: [segments[1]] });
       return json(200, { success: true });
     }
@@ -349,6 +363,13 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
       await db.execute("DELETE FROM absent_members");
       await db.execute("DELETE FROM reports");
       await db.execute("DELETE FROM pending_approvals");
+      await db.execute({ sql: "DELETE FROM admin_notifications WHERE type = ?", args: ['report'] });
+      await db.execute("DELETE FROM violations");
+      return json(200, { success: true });
+    }
+
+    if (method === "POST" && segments[0] === "violations" && segments[1] === "reset") {
+      await db.execute("DELETE FROM violations");
       return json(200, { success: true });
     }
 
@@ -370,6 +391,28 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
       const ex = await db.execute({ sql: "SELECT id FROM schedules WHERE day = ? AND id != ?", args: [day, segments[1]] });
       if (ex.rows.length > 0) return json(400, { success: false, message: `Hari ${day} sudah memiliki jadwal kelas` });
       await db.execute({ sql: "UPDATE schedules SET group_name = ?, day = ? WHERE id = ?", args: [group_name, day, segments[1]] });
+      return json(200, { success: true });
+    }
+
+    if (method === "POST" && segments[0] === "schedules" && segments[1] === "randomize-names") {
+      const sRes = await db.execute("SELECT group_name FROM schedules");
+      if (sRes.rows.length === 0) return json(200, { success: true, message: "Belum ada jadwal" });
+      const COMPUTER_TERMS_LOCAL = ["Algorithm", "Binary", "Cache", "Daemon", "Ethernet", "Firmware", "Gateway", "Hexadecimal", "Interface", "Kernel", "Lambda", "Mutex", "Namespace", "OAuth", "Protocol", "Query", "Router", "Subnet", "Terminal", "Uptime", "Vector", "Webhook", "Xorshift", "Yaml", "Zeroconf", "Bootloader", "Compiler", "Debugger", "Encoder", "Firewall", "Hypervisor", "Iterator", "Linker", "Microkernel", "Nonce", "Overhead", "Pipeline", "Queue", "Recursion", "Semaphore", "Thread", "Unicode", "Virtual", "Wrapper", "Yarn", "Zipfile"];
+      const usedTerms: string[] = [];
+      for (const row of sRes.rows) {
+        const oldName = row.group_name as string;
+        let newTerm = "";
+        const available = COMPUTER_TERMS_LOCAL.filter(t => !usedTerms.includes(t));
+        if (available.length > 0) {
+          newTerm = available[Math.floor(Math.random() * available.length)];
+        } else {
+          newTerm = `${COMPUTER_TERMS_LOCAL[Math.floor(Math.random() * COMPUTER_TERMS_LOCAL.length)]} ${usedTerms.length + 1}`;
+        }
+        usedTerms.push(newTerm);
+        const newName = `Kelompok ${newTerm}`;
+        await db.execute({ sql: "UPDATE schedules SET group_name = ? WHERE group_name = ?", args: [newName, oldName] });
+        await db.execute({ sql: "UPDATE users SET group_name = ? WHERE group_name = ?", args: [newName, oldName] });
+      }
       return json(200, { success: true });
     }
 
@@ -536,6 +579,39 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
       return json(200, { success: true });
     }
 
+    // JADWAL PELAJARAN
+    if (method === "GET" && segments[0] === "jadwal-pelajaran" && !segments[1]) {
+      const r = await db.execute("SELECT * FROM jadwal_pelajaran ORDER BY CASE hari WHEN 'Senin' THEN 1 WHEN 'Selasa' THEN 2 WHEN 'Rabu' THEN 3 WHEN 'Kamis' THEN 4 WHEN 'Jumat' THEN 5 ELSE 6 END, jam_ke ASC");
+      return json(200, r.rows);
+    }
+    if (method === "POST" && segments[0] === "jadwal-pelajaran" && !segments[1]) {
+      const { hari, jam_ke, jam_mulai, jam_selesai, mata_pelajaran, guru } = JSON.parse(event.body || "{}");
+      if (!hari || !jam_ke || !mata_pelajaran) return json(400, { success: false, message: "Data tidak lengkap" });
+      await db.execute({ sql: "INSERT INTO jadwal_pelajaran (hari, jam_ke, jam_mulai, jam_selesai, mata_pelajaran, guru) VALUES (?, ?, ?, ?, ?, ?)", args: [hari, jam_ke, jam_mulai || null, jam_selesai || null, mata_pelajaran, guru || null] });
+      return json(200, { success: true });
+    }
+    if (method === "PUT" && segments[0] === "jadwal-pelajaran" && segments[1]) {
+      const { hari, jam_ke, jam_mulai, jam_selesai, mata_pelajaran, guru } = JSON.parse(event.body || "{}");
+      await db.execute({ sql: "UPDATE jadwal_pelajaran SET hari=?, jam_ke=?, jam_mulai=?, jam_selesai=?, mata_pelajaran=?, guru=? WHERE id=?", args: [hari, jam_ke, jam_mulai || null, jam_selesai || null, mata_pelajaran, guru || null, segments[1]] });
+      return json(200, { success: true });
+    }
+    if (method === "DELETE" && segments[0] === "jadwal-pelajaran" && segments[1]) {
+      await db.execute({ sql: "DELETE FROM jadwal_pelajaran WHERE id=?", args: [segments[1]] });
+      return json(200, { success: true });
+    }
+    if (method === "DELETE" && segments[0] === "jadwal-pelajaran" && !segments[1]) {
+      await db.execute("DELETE FROM jadwal_pelajaran");
+      return json(200, { success: true });
+    }
+    if (method === "POST" && segments[0] === "jadwal-pelajaran" && segments[1] === "import") {
+      const { rows } = JSON.parse(event.body || "{}");
+      if (!Array.isArray(rows) || rows.length === 0) return json(400, { success: false, message: "Data kosong" });
+      for (const r of rows) {
+        await db.execute({ sql: "INSERT INTO jadwal_pelajaran (hari, jam_ke, jam_mulai, jam_selesai, mata_pelajaran, guru) VALUES (?, ?, ?, ?, ?, ?)", args: [r.hari, r.jam_ke, r.jam_mulai || null, r.jam_selesai || null, r.mata_pelajaran, r.guru || null] });
+      }
+      return json(200, { success: true, imported: rows.length });
+    }
+
     // VIOLATIONS
     if (method === "GET" && segments[0] === "violations" && !segments[1]) {
       const r = await db.execute("SELECT * FROM violations ORDER BY date DESC");
@@ -635,9 +711,9 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
       const allMembersRes = await db.execute("SELECT id, name FROM class_members");
       if (allMembersRes.rows.length === 0) return json(400, { success: false, message: "Belum ada anggota kelas" });
       if (pjCount > allMembersRes.rows.length) return json(400, { success: false, message: "Jumlah grup melebihi jumlah anggota" });
-      const COMPUTER_TERMS_LOCAL = ["Algorithm","Binary","Cache","Daemon","Ethernet","Firmware","Gateway","Hexadecimal","Interface","Kernel","Lambda","Mutex","Namespace","OAuth","Protocol","Query","Router","Subnet","Terminal","Uptime","Vector","Webhook","Xorshift","Yaml","Zeroconf","Bootloader","Compiler","Debugger","Encoder","Firewall","Hypervisor","Iterator","Linker","Microkernel","Nonce","Overhead","Pipeline","Queue","Recursion","Semaphore","Thread","Unicode","Virtual","Wrapper","Yarn","Zipfile"];
-      const DAYS_ORDER_S = ["Senin","Selasa","Rabu","Kamis","Jumat"];
-      function shuffleArr<T>(arr: T[]): T[] { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+      const COMPUTER_TERMS_LOCAL = ["Algorithm", "Binary", "Cache", "Daemon", "Ethernet", "Firmware", "Gateway", "Hexadecimal", "Interface", "Kernel", "Lambda", "Mutex", "Namespace", "OAuth", "Protocol", "Query", "Router", "Subnet", "Terminal", "Uptime", "Vector", "Webhook", "Xorshift", "Yaml", "Zeroconf", "Bootloader", "Compiler", "Debugger", "Encoder", "Firewall", "Hypervisor", "Iterator", "Linker", "Microkernel", "Nonce", "Overhead", "Pipeline", "Queue", "Recursion", "Semaphore", "Thread", "Unicode", "Virtual", "Wrapper", "Yarn", "Zipfile"];
+      const DAYS_ORDER_S = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"];
+      function shuffleArr<T>(arr: T[]): T[] { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]]; } return a; }
       const shuffledMembers = shuffleArr(allMembersRes.rows);
       const shuffledDays = shuffleArr([...DAYS_ORDER_S]).slice(0, pjCount);
       await db.execute("UPDATE class_members SET pj_id = NULL");
@@ -655,16 +731,16 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
         const groupName = `Kelompok ${term}`;
         const code = generateCode(6);
         // Use RETURNING id to avoid race condition on Turso HTTP
-        const insertPJ = await db.execute({ sql: "INSERT INTO users (name, account_code, role, group_name) VALUES (?, ?, 'pj', ?) RETURNING id", args: [pjMember.name as string, code, groupName] });
+        const insertPJ = await db.execute({ sql: "INSERT INTO users (name, account_code, role, group_name) VALUES (?, ?, 'pj', ?) RETURNING id", args: [(pjMember as any).name as string, code, groupName] });
         let newPJId: number;
-        if (insertPJ.rows.length > 0 && insertPJ.rows[0].id) {
-          newPJId = insertPJ.rows[0].id as number;
+        if (insertPJ.rows.length > 0 && (insertPJ.rows[0] as any).id) {
+          newPJId = (insertPJ.rows[0] as any).id as number;
         } else {
-          const newPJ = await db.execute({ sql: "SELECT id FROM users WHERE name = ? AND account_code = ?", args: [pjMember.name as string, code] });
-          newPJId = newPJ.rows[0].id as number;
+          const newPJ = await db.execute({ sql: "SELECT id FROM users WHERE name = ? AND account_code = ?", args: [(pjMember as any).name as string, code] });
+          newPJId = (newPJ.rows[0] as any).id as number;
         }
-        for (const m of groupMembers) { await db.execute({ sql: "UPDATE class_members SET pj_id = ? WHERE id = ?", args: [newPJId, m.id as number] }); }
-        await db.execute({ sql: "UPDATE users SET member_id = ? WHERE id = ?", args: [pjMember.id as number, newPJId] });
+        for (const m of groupMembers) { await db.execute({ sql: "UPDATE class_members SET pj_id = ? WHERE id = ?", args: [newPJId, (m as any).id as number] }); }
+        await db.execute({ sql: "UPDATE users SET member_id = ? WHERE id = ?", args: [(pjMember as any).id as number, newPJId] });
         if (shuffledDays[i]) { await db.execute({ sql: "INSERT INTO schedules (group_name, day) VALUES (?, ?)", args: [groupName, shuffledDays[i]] }); }
       }
       return json(200, { success: true });
@@ -673,7 +749,7 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
     if (method === "POST" && segments[0] === "schedules" && segments[1] === "import-text") {
       const { text } = JSON.parse(event.body || "{}");
       if (!text) return json(400, { success: false, message: "Teks tidak boleh kosong" });
-      const DAYS_ORDER_I = ["Senin","Selasa","Rabu","Kamis","Jumat"];
+      const DAYS_ORDER_I = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"];
       type ParsedGroupI = { day: string; pjName: string; groupName: string; memberNames: string[] };
       const lines = (text as string).split("\n").map((l: string) => l.trim()).filter(Boolean);
       const groups: ParsedGroupI[] = [];
@@ -731,6 +807,63 @@ export const handler: Handler = async (event: HandlerEvent, _ctx: HandlerContext
 
     if (method === "POST" && segments[0] === "reports" && segments[2] === "react") {
       await db.execute({ sql: "UPDATE reports SET is_read = 1 WHERE id = ?", args: [segments[1]] });
+      return json(200, { success: true });
+    }
+
+    // Random group name
+    if (method === "GET" && segments[0] === "random-group-name") {
+      const COMPUTER_TERMS_RGN = ["Algorithm", "Binary", "Cache", "Daemon", "Ethernet", "Firmware", "Gateway", "Hexadecimal", "Interface", "Kernel", "Lambda", "Mutex", "Namespace", "OAuth", "Protocol", "Query", "Router", "Subnet", "Terminal", "Uptime", "Vector", "Webhook", "Xorshift", "Yaml", "Zeroconf", "Bootloader", "Compiler", "Debugger", "Encoder", "Firewall", "Hypervisor", "Iterator", "Linker", "Microkernel", "Nonce", "Overhead", "Pipeline", "Queue", "Recursion", "Semaphore", "Thread", "Unicode", "Virtual", "Wrapper", "Yarn", "Zipfile"];
+      const usedRes = await db.execute("SELECT group_name FROM schedules");
+      const usedNames = usedRes.rows.map((r: any) => r.group_name as string);
+      const usedTerms = COMPUTER_TERMS_RGN.filter(t => usedNames.some(n => n.includes(t)));
+      const available = COMPUTER_TERMS_RGN.filter(t => !usedTerms.includes(t));
+      const pool = available.length > 0 ? available : COMPUTER_TERMS_RGN;
+      const term = pool[Math.floor(Math.random() * pool.length)];
+      return json(200, { group_name: `Kelompok ${term}` });
+    }
+
+    // Admin recompress images (no-op on Netlify/Turso since images stored as base64 in DB)
+    if (method === "POST" && segments[0] === "admin" && segments[1] === "recompress-images") {
+      return json(200, { success: true, message: "Rekompresi foto tidak diperlukan di mode cloud (foto sudah dikompres saat upload)." });
+    }
+
+    // Admin edit report photo (no time limit)
+    if (method === "POST" && segments[0] === "admin" && segments[1] === "report" && segments[3] === "edit-photo") {
+      const reportId = segments[2];
+      const { fields, file } = parseMultipart(event);
+      const photoType = fields.photo_type || "cleaning";
+      let photoPath = "";
+      if (file) {
+        const filename = file.filename;
+        await db.execute({ sql: "INSERT OR REPLACE INTO file_uploads (filename, data, mime_type) VALUES (?, ?, ?)", args: [filename, file.data, file.mimeType] });
+        photoPath = `/api/uploads/${filename}`;
+      }
+      if (photoType === "checkin") {
+        await db.execute({ sql: "UPDATE reports SET checkin_photo = ? WHERE id = ?", args: [photoPath, reportId] });
+      } else {
+        await db.execute({ sql: "UPDATE reports SET cleaning_photo = ? WHERE id = ?", args: [photoPath, reportId] });
+      }
+      return json(200, { success: true });
+    }
+
+    // Admin edit report absents (no time limit)
+    if (method === "POST" && segments[0] === "admin" && segments[1] === "report" && segments[3] === "edit-absents") {
+      const reportId = segments[2];
+      const { fields } = parseMultipart(event);
+      const absentList: Array<{ member_id: number; name: string; reason: string }> = fields.absents ? JSON.parse(fields.absents) : [];
+      const reportRes = await db.execute({ sql: "SELECT date, pj_id FROM reports WHERE id = ?", args: [reportId] });
+      if (!reportRes.rows.length) return json(404, { success: false, message: "Laporan tidak ditemukan" });
+      const { date, pj_id } = reportRes.rows[0] as any;
+      const VIOLATION_STATUSES: Record<string, string> = { "Sakit (Surat)": "Sakit", "Sakit (Tanpa Surat)": "Sakit", "Dispensasi": "Dispensasi", "Alfa": "Alfa", "Izin Telat": "Telat", "Izin": "Izin", "Telat": "Telat", "Tidak Piket": "Tidak Piket" };
+      await db.execute({ sql: "DELETE FROM absent_members WHERE report_id = ?", args: [reportId] });
+      await db.execute({ sql: "DELETE FROM violations WHERE pj_id = ? AND date = ?", args: [pj_id, date] });
+      for (const absent of absentList) {
+        await db.execute({ sql: "INSERT INTO absent_members (report_id, member_id, name, reason) VALUES (?, ?, ?, ?)", args: [reportId, absent.member_id, absent.name, absent.reason] });
+        const vType = VIOLATION_STATUSES[absent.reason];
+        if (vType && absent.reason !== "Izin") {
+          await db.execute({ sql: "INSERT INTO violations (member_id, member_name, pj_id, date, type) VALUES (?, ?, ?, ?, ?)", args: [absent.member_id, absent.name, pj_id, date, vType] });
+        }
+      }
       return json(200, { success: true });
     }
 
